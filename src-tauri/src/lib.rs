@@ -30,6 +30,10 @@ pub fn run() {
             commands::get_model_status,
             commands::accessibility_status,
             commands::open_accessibility_settings,
+            commands::list_models,
+            commands::download_model,
+            commands::cancel_download,
+            commands::delete_model,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

@@ -7,7 +7,7 @@ use speakly_engine::{EngineEvent, EventSink, Phase};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::paste::{paste_text, PasteOutcome};
-use crate::settings::SettingsState;
+use crate::settings::{ModelEntry, SettingsState};
 use crate::{hud, tray};
 
 pub struct AppSink {
@@ -44,6 +44,43 @@ impl EventSink for AppSink {
                     "engine://warning",
                     json!({ "code": code, "message": message }),
                 );
+            }
+            EngineEvent::ModelProgress {
+                id,
+                bytes,
+                total,
+                bps,
+            } => {
+                let _ = self.app.emit(
+                    "model://progress",
+                    json!({ "id": id, "bytes": bytes, "total": total, "bps": bps }),
+                );
+            }
+            EngineEvent::ModelReady { id, path } => {
+                {
+                    let state = self.app.state::<SettingsState>();
+                    let mut settings = state.0.lock().unwrap();
+                    let scale_default = id != "he-turbo";
+                    let entry = settings
+                        .models
+                        .entry(id.clone())
+                        .or_insert_with(|| ModelEntry {
+                            path: String::new(),
+                            scale_audio_ctx: scale_default,
+                        });
+                    entry.path = path.clone();
+                    crate::settings::save(&self.app, &settings);
+                }
+                tracing::info!("model {id} installed at {path}");
+                let _ = self
+                    .app
+                    .emit("model://ready", json!({ "id": id, "path": path }));
+            }
+            EngineEvent::ModelError { id, message } => {
+                tracing::warn!("model {id} download failed: {message}");
+                let _ = self
+                    .app
+                    .emit("model://error", json!({ "id": id, "message": message }));
             }
             EngineEvent::TranscriptReady {
                 profile_id,

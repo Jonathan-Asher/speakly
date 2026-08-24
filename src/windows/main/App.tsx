@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { strings } from "../../lib/strings";
 import { DictationView } from "../../features/dictation/DictationView";
+import { ModelsView } from "../../features/models/ModelsView";
 
 type Section = keyof typeof strings.nav;
 
@@ -30,6 +31,8 @@ export function App() {
       <main className="flex flex-1 justify-center overflow-y-auto p-8 pt-12">
         {active === "dictation" ? (
           <DictationView />
+        ) : active === "models" ? (
+          <ModelsView />
         ) : (
           <div className="self-center text-center text-sm text-neutral-400">
             {strings.nav[active]} — coming in the next phases.

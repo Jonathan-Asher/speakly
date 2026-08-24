@@ -1,8 +1,20 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use serde_json::{json, Value};
-use tauri::{AppHandle, State};
+use speakly_engine::models::{download::dest_path, registry};
+use speakly_engine::Engine;
+use tauri::{AppHandle, Manager, State};
 
 use crate::paste::accessibility_trusted;
 use crate::settings::SettingsState;
+
+fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("models"))
+        .map_err(|e| format!("app data dir: {e}"))
+}
 
 #[tauri::command]
 pub fn get_profiles(state: State<'_, SettingsState>) -> Vec<speakly_engine_types::Profile> {
@@ -38,4 +50,107 @@ pub fn open_accessibility_settings(app: AppHandle) {
         None::<String>,
     );
     let _ = app;
+}
+
+#[tauri::command]
+pub fn list_models(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    engine: State<'_, Arc<Engine>>,
+) -> Result<Value, String> {
+    let dir = models_dir(&app)?;
+    let settings = state.0.lock().unwrap();
+    let models: Vec<Value> = registry::REGISTRY
+        .iter()
+        .map(|info| {
+            let managed = dest_path(&dir, info.id);
+            let settings_path = settings
+                .models
+                .get(info.id)
+                .map(|m| m.path.clone())
+                .unwrap_or_default();
+            let path = if managed.is_file() {
+                managed.to_string_lossy().into_owned()
+            } else if !settings_path.is_empty() && std::path::Path::new(&settings_path).is_file() {
+                settings_path
+            } else {
+                String::new()
+            };
+            let used_by: Vec<String> = settings
+                .profiles
+                .iter()
+                .filter(|p| p.model_id == info.id)
+                .map(|p| p.name.clone())
+                .collect();
+            json!({
+                "id": info.id,
+                "name": info.name,
+                "sizeBytes": info.size_bytes,
+                "languages": info.languages,
+                "license": info.license,
+                "installed": !path.is_empty(),
+                "path": path,
+                "downloading": engine.models.is_downloading(info.id),
+                "usedBy": used_by,
+            })
+        })
+        .collect();
+    Ok(json!({ "models": models }))
+}
+
+#[tauri::command]
+pub fn download_model(
+    app: AppHandle,
+    engine: State<'_, Arc<Engine>>,
+    id: String,
+) -> Result<(), String> {
+    let dir = models_dir(&app)?;
+    engine.models.download(&id, dir)
+}
+
+#[tauri::command]
+pub fn cancel_download(engine: State<'_, Arc<Engine>>, id: String) {
+    engine.models.cancel(&id);
+}
+
+#[tauri::command]
+pub fn delete_model(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    engine: State<'_, Arc<Engine>>,
+    id: String,
+) -> Result<Value, String> {
+    if engine.models.is_downloading(&id) {
+        return Err("cancel the running download first".into());
+    }
+    let dir = models_dir(&app)?;
+    // Only ever delete the managed file; never a user-provided path.
+    let managed = dest_path(&dir, &id);
+    if managed.is_file() {
+        std::fs::remove_file(&managed).map_err(|e| format!("delete: {e}"))?;
+    }
+    let mut warning: Option<String> = None;
+    {
+        let mut settings = state.0.lock().unwrap();
+        let managed_str = managed.to_string_lossy();
+        if let Some(entry) = settings.models.get_mut(&id) {
+            if entry.path == managed_str {
+                entry.path = String::new();
+            }
+        }
+        let users: Vec<String> = settings
+            .profiles
+            .iter()
+            .filter(|p| p.model_id == id)
+            .map(|p| p.name.clone())
+            .collect();
+        if !users.is_empty() {
+            warning = Some(format!(
+                "Profiles using this model will not start until it is reinstalled: {}",
+                users.join(", ")
+            ));
+        }
+        crate::settings::save(&app, &settings);
+    }
+    Ok(json!({ "warning": warning }))
 }

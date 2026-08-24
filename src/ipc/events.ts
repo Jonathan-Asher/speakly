@@ -43,3 +43,32 @@ export function onDictationFinal(cb: (e: DictationFinalEvent) => void) {
 export function onEngineWarning(cb: (e: EngineWarningEvent) => void) {
   return listen<EngineWarningEvent>("engine://warning", (e) => cb(e.payload));
 }
+
+export interface ModelProgressEvent {
+  id: string;
+  bytes: number;
+  total: number | null;
+  bps: number;
+}
+
+export interface ModelReadyEvent {
+  id: string;
+  path: string;
+}
+
+export interface ModelErrorEvent {
+  id: string;
+  message: string;
+}
+
+export function onModelProgress(cb: (e: ModelProgressEvent) => void) {
+  return listen<ModelProgressEvent>("model://progress", (e) => cb(e.payload));
+}
+
+export function onModelReady(cb: (e: ModelReadyEvent) => void) {
+  return listen<ModelReadyEvent>("model://ready", (e) => cb(e.payload));
+}
+
+export function onModelError(cb: (e: ModelErrorEvent) => void) {
+  return listen<ModelErrorEvent>("model://error", (e) => cb(e.payload));
+}

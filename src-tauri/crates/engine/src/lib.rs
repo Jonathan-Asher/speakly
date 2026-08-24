@@ -4,11 +4,13 @@
 
 pub mod audio;
 pub mod dictation;
+pub mod models;
 pub mod stt;
 
 use std::sync::Arc;
 
 pub use dictation::{DictationEngine, DictationSpec};
+pub use models::ModelService;
 pub use stt::SttService;
 
 /// The engine's only way to talk to the outside world. The app crate
@@ -56,18 +58,38 @@ pub enum EngineEvent {
         code: String,
         message: String,
     },
+    ModelProgress {
+        id: String,
+        bytes: u64,
+        total: Option<u64>,
+        bps: u64,
+    },
+    ModelReady {
+        id: String,
+        path: String,
+    },
+    ModelError {
+        id: String,
+        message: String,
+    },
 }
 
 /// Facade owning the engine services. One per app.
 pub struct Engine {
     pub stt: SttService,
     pub dictation: DictationEngine,
+    pub models: ModelService,
 }
 
 impl Engine {
     pub fn new(sink: Arc<dyn EventSink>) -> Self {
         let stt = SttService::spawn();
+        let models = ModelService::new(Arc::clone(&sink));
         let dictation = DictationEngine::new(stt.clone(), sink);
-        Self { stt, dictation }
+        Self {
+            stt,
+            dictation,
+            models,
+        }
     }
 }

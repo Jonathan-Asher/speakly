@@ -72,19 +72,20 @@ pub fn save(app: &AppHandle, settings: &Settings) {
 /// point at known local files when present; the in-app model manager (P1
 /// follow-up) replaces this with managed downloads into the app data dir.
 fn seed() -> Settings {
+    // Managed (model-manager) locations first, then dev-machine fallbacks.
     let he_candidates = [
         format!(
-            "{}/Documents/Work/speakly/models-dev/ggml-ivrit-large-v3-turbo.bin",
+            "{}/Library/Application Support/com.speakly.app/models/ggml-he-turbo.bin",
             home()
         ),
         format!(
-            "{}/Library/Application Support/com.speakly.app/models/ggml-ivrit-large-v3-turbo.bin",
+            "{}/Documents/Work/speakly/models-dev/ggml-ivrit-large-v3-turbo.bin",
             home()
         ),
     ];
     let en_candidates = [
         format!(
-            "{}/Library/Application Support/com.speakly.app/models/ggml-large-v3-turbo.bin",
+            "{}/Library/Application Support/com.speakly.app/models/ggml-turbo.bin",
             home()
         ),
         format!(
