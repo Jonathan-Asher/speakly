@@ -36,7 +36,10 @@ pub fn diarize(
     num_speakers: Option<usize>,
 ) -> Result<Vec<SpeakerTurn>, String> {
     if !seg_model.is_file() {
-        return Err(format!("segmentation model missing: {}", seg_model.display()));
+        return Err(format!(
+            "segmentation model missing: {}",
+            seg_model.display()
+        ));
     }
     if !emb_model.is_file() {
         return Err(format!("embedding model missing: {}", emb_model.display()));
@@ -52,8 +55,8 @@ pub fn diarize(
         provider: None,
         debug: false,
     };
-    let mut engine = Diarize::new(seg_model, emb_model, config)
-        .map_err(|e| format!("diarization init: {e}"))?;
+    let mut engine =
+        Diarize::new(seg_model, emb_model, config).map_err(|e| format!("diarization init: {e}"))?;
     let turns = engine
         .compute(audio_16k.to_vec(), None)
         .map_err(|e| format!("diarization: {e}"))?;

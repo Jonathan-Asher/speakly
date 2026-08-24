@@ -75,6 +75,7 @@ pub const REGISTRY: &[ModelInfo] = &[
         sha256: None,
         languages: "language-independent",
         license: "MIT",
+        hidden: false,
     },
     ModelInfo {
         id: "diar-emb",
@@ -84,6 +85,7 @@ pub const REGISTRY: &[ModelInfo] = &[
         sha256: None,
         languages: "language-independent",
         license: "Apache-2.0",
+        hidden: false,
     },
 ];
 

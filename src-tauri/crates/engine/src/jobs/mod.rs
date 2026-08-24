@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
 use crate::audio::resample::WHISPER_RATE;
-use crate::diarize::DiarizeOpts;
 use crate::audio::{decode, ffmpeg_fallback};
+use crate::diarize::DiarizeOpts;
 use crate::stt::{scaled_audio_ctx, DecodeRequest, SttService};
 use crate::{EngineEvent, EventSink};
 
