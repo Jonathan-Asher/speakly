@@ -3,6 +3,7 @@ import { strings } from "../../lib/strings";
 import { DictationView } from "../../features/dictation/DictationView";
 import { ModelsView } from "../../features/models/ModelsView";
 import { HistoryView } from "../../features/history/HistoryView";
+import { MeetingsView } from "../../features/meetings/MeetingsView";
 
 type Section = keyof typeof strings.nav;
 
@@ -36,6 +37,8 @@ export function App() {
           <ModelsView />
         ) : active === "history" ? (
           <HistoryView />
+        ) : active === "meetings" ? (
+          <MeetingsView />
         ) : (
           <div className="self-center text-center text-sm text-neutral-400">
             {strings.nav[active]} — coming in the next phases.

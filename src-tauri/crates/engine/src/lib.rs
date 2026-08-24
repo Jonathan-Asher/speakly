@@ -4,12 +4,14 @@
 
 pub mod audio;
 pub mod dictation;
+pub mod meeting;
 pub mod models;
 pub mod stt;
 
 use std::sync::Arc;
 
 pub use dictation::{DictationEngine, DictationSpec};
+pub use meeting::{MeetingOpts, MeetingService};
 pub use models::ModelService;
 pub use stt::SttService;
 
@@ -72,6 +74,25 @@ pub enum EngineEvent {
         id: String,
         message: String,
     },
+    MeetingStatus {
+        session_id: u64,
+        state: String,
+        message: Option<String>,
+    },
+    MeetingSegment {
+        session_id: u64,
+        t0_ms: u64,
+        t1_ms: u64,
+        text: String,
+        source: String,
+    },
+    /// Emitted once per session after the final window flush; the app layer
+    /// persists the concatenated transcript to history.
+    MeetingFinished {
+        session_id: u64,
+        text: String,
+        duration_ms: u64,
+    },
 }
 
 /// Facade owning the engine services. One per app.
@@ -79,17 +100,20 @@ pub struct Engine {
     pub stt: SttService,
     pub dictation: DictationEngine,
     pub models: ModelService,
+    pub meetings: MeetingService,
 }
 
 impl Engine {
     pub fn new(sink: Arc<dyn EventSink>) -> Self {
         let stt = SttService::spawn();
         let models = ModelService::new(Arc::clone(&sink));
+        let meetings = MeetingService::new(stt.clone(), Arc::clone(&sink));
         let dictation = DictationEngine::new(stt.clone(), sink);
         Self {
             stt,
             dictation,
             models,
+            meetings,
         }
     }
 }

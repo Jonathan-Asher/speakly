@@ -29,3 +29,7 @@ models-dev/
 
 # Agent worktrees
 .claude/worktrees/
+
+# Sidecar build artifacts
+src-tauri/binaries/
+sidecars/speakly-syscap/.build/

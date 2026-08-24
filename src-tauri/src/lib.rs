@@ -44,6 +44,11 @@ pub fn run() {
             commands::provider_key_status,
             commands::delete_provider_key,
             commands::test_translation,
+            commands::screen_recording_status,
+            commands::open_screen_recording_settings,
+            commands::meeting_list_apps,
+            commands::meeting_start,
+            commands::meeting_stop,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
