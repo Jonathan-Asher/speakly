@@ -229,3 +229,56 @@ pub fn delete_model(
     }
     Ok(json!({ "warning": warning }))
 }
+
+#[tauri::command]
+pub fn engine_info(app: AppHandle, state: State<'_, SettingsState>) -> Value {
+    let settings = state.0.lock().unwrap();
+    let models: Vec<Value> = settings
+        .models
+        .iter()
+        .map(|(id, m)| {
+            json!({
+                "id": id,
+                "present": !m.path.is_empty() && std::path::Path::new(&m.path).is_file(),
+            })
+        })
+        .collect();
+    json!({
+        "version": app.package_info().version.to_string(),
+        "backend": "whisper.cpp · Metal",
+        "autoCheckUpdates": settings.updates.auto_check,
+        "models": models,
+        "logDir": crate::logs::log_dir().to_string_lossy(),
+    })
+}
+
+#[tauri::command]
+pub fn set_update_auto_check(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut settings = state.0.lock().unwrap();
+    settings.updates.auto_check = enabled;
+    crate::settings::save(&app, &settings);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_log_path() -> String {
+    crate::logs::current_log_file()
+        .unwrap_or_else(crate::logs::log_dir)
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[tauri::command]
+pub fn reveal_logs() -> Result<(), String> {
+    let target = crate::logs::current_log_file().unwrap_or_else(crate::logs::log_dir);
+    tauri_plugin_opener::reveal_item_in_dir(target).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn read_log_tail(lines: u32) -> Result<String, String> {
+    crate::logs::tail(lines as usize)
+}

@@ -3,6 +3,9 @@ import { strings } from "../../lib/strings";
 import { DictationView } from "../../features/dictation/DictationView";
 import { ModelsView } from "../../features/models/ModelsView";
 import { HistoryView } from "../../features/history/HistoryView";
+import { UpdatesCard } from "../../features/settings/UpdatesCard";
+import { DiagnosticsCard } from "../../features/settings/DiagnosticsCard";
+import { AcknowledgementsCard } from "../../features/settings/AcknowledgementsCard";
 
 type Section = keyof typeof strings.nav;
 
@@ -36,6 +39,12 @@ export function App() {
           <ModelsView />
         ) : active === "history" ? (
           <HistoryView />
+        ) : active === "settings" ? (
+          <div className="flex w-full max-w-2xl flex-col gap-4">
+            <UpdatesCard />
+            <DiagnosticsCard />
+            <AcknowledgementsCard />
+          </div>
         ) : (
           <div className="self-center text-center text-sm text-neutral-400">
             {strings.nav[active]} — coming in the next phases.

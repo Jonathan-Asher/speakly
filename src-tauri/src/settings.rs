@@ -35,6 +35,17 @@ impl Default for HistorySettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdatesSettings {
+    pub auto_check: bool,
+}
+
+impl Default for UpdatesSettings {
+    fn default() -> Self {
+        Self { auto_check: true }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub profiles: Vec<Profile>,
     pub models: HashMap<String, ModelEntry>,
@@ -42,6 +53,8 @@ pub struct Settings {
     pub preload_model_id: Option<String>,
     #[serde(default)]
     pub history: HistorySettings,
+    #[serde(default)]
+    pub updates: UpdatesSettings,
 }
 
 pub struct SettingsState(pub Mutex<Settings>);
@@ -172,6 +185,7 @@ fn seed() -> Settings {
         models,
         preload_model_id: Some("he-turbo".into()),
         history: HistorySettings::default(),
+        updates: UpdatesSettings::default(),
     }
 }
 
