@@ -49,4 +49,4 @@ jobs:
         run: |
           ! grep -riIn -E 'whisperdesk|aptabase|A-US-|electron|handy|\bmila\b' \
             --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=target \
-            --exclude=Cargo.lock --exclude=pnpm-lock.yaml .
+            --exclude-dir=.github --exclude=Cargo.lock --exclude=pnpm-lock.yaml .

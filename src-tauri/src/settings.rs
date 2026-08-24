@@ -102,16 +102,10 @@ fn seed() -> Settings {
             home()
         ),
     ];
-    let en_candidates = [
-        format!(
-            "{}/Library/Application Support/com.speakly.app/models/ggml-turbo.bin",
-            home()
-        ),
-        format!(
-            "{}/Documents/Work/WhisperDesk/models/ggml-large-v3-turbo.bin",
-            home()
-        ),
-    ];
+    let en_candidates = [format!(
+        "{}/Library/Application Support/com.speakly.app/models/ggml-turbo.bin",
+        home()
+    )];
 
     let mut models = HashMap::new();
     models.insert(
