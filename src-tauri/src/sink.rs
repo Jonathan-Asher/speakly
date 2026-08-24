@@ -41,6 +41,16 @@ impl EventSink for AppSink {
                     schedule_idle(&self.app, profile_id, 2_500);
                 }
             }
+            EngineEvent::DictationPartial {
+                profile_id,
+                committed,
+                volatile,
+            } => {
+                let _ = self.app.emit(
+                    "dictation://partial",
+                    json!({ "profileId": profile_id, "committed": committed, "volatile": volatile }),
+                );
+            }
             EngineEvent::Warning { code, message } => {
                 tracing::warn!("engine warning [{code}]: {message}");
                 let _ = self.app.emit(
@@ -60,7 +70,8 @@ impl EventSink for AppSink {
                 );
             }
             EngineEvent::ModelReady { id, path } => {
-                {
+                let hidden = speakly_engine::models::registry::get(&id).is_some_and(|m| m.hidden);
+                if !hidden {
                     let state = self.app.state::<SettingsState>();
                     let mut settings = state.0.lock().unwrap();
                     let scale_default = id != "he-turbo";

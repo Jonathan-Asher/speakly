@@ -6,7 +6,7 @@
 use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
 pub const HUD_LABEL: &str = "hud";
-const WIDTH: f64 = 320.0;
+const WIDTH: f64 = 480.0;
 const HEIGHT: f64 = 76.0;
 const BOTTOM_MARGIN: f64 = 96.0;
 

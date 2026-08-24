@@ -284,6 +284,7 @@ pub fn list_models(
     let settings = state.0.lock().unwrap();
     let models: Vec<Value> = registry::REGISTRY
         .iter()
+        .filter(|info| !info.hidden)
         .map(|info| {
             let managed = dest_path(&dir, info.id);
             let settings_path = settings

@@ -12,17 +12,36 @@ export function HudPill() {
   }, []);
   const phase = useDictationStore((s) => s.phase);
   const warning = useDictationStore((s) => s.warning);
+  const partial = useDictationStore((s) => s.partial);
+  const hasPartial = !!partial && (partial.committed !== "" || partial.volatile !== "");
 
   return (
     <div className="flex h-screen items-end justify-center bg-transparent pb-1">
       <div className="flex items-center gap-2.5 rounded-full bg-neutral-900/90 px-4 py-2 text-white shadow-lg backdrop-blur">
         {phase === "listening" && (
           <>
-            <span className="relative flex size-2.5">
+            <span className="relative flex size-2.5 shrink-0">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
               <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
             </span>
-            <span className="text-sm font-medium">{strings.hud.listening}</span>
+            {hasPartial ? (
+              // dir=auto + flex-end keeps the *end* of the transcript visible
+              // for both LTR and RTL text as it grows.
+              <div dir="auto" className="flex max-w-[400px] justify-end overflow-hidden">
+                <span
+                  className="text-sm font-medium whitespace-nowrap"
+                  style={{ unicodeBidi: "plaintext" }}
+                >
+                  {partial.committed}
+                  {partial.committed && partial.volatile ? " " : ""}
+                  {partial.volatile && (
+                    <span className="italic text-neutral-400">{partial.volatile}</span>
+                  )}
+                </span>
+              </div>
+            ) : (
+              <span className="text-sm font-medium">{strings.hud.listening}</span>
+            )}
           </>
         )}
         {(phase === "transcribing" || phase === "pasting") && (

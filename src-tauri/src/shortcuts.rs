@@ -95,5 +95,23 @@ fn start(app: &AppHandle, engine: &Engine, profile_id: &str) {
         model_id: profile.model_id.clone(),
         model_path: model.path.clone(),
         scale_audio_ctx: model.scale_audio_ctx,
+        vad_model_path: vad_model_path(app, engine),
     });
+}
+
+/// Managed Silero VAD file when installed; otherwise kick off a silent
+/// background download (2 MB) so a later dictation gets it. Dictation works
+/// without it — partials and trimming just wait for the model.
+fn vad_model_path(app: &AppHandle, engine: &Engine) -> Option<String> {
+    let dir = app.path().app_data_dir().ok()?.join("models");
+    let path = speakly_engine::models::download::dest_path(&dir, "vad-silero");
+    if path.is_file() {
+        return Some(path.to_string_lossy().into_owned());
+    }
+    if !engine.models.is_downloading("vad-silero") {
+        if let Err(e) = engine.models.download("vad-silero", dir) {
+            tracing::debug!("vad model download not started: {e}");
+        }
+    }
+    None
 }

@@ -3,7 +3,11 @@
 //! stay loaded between utterances, which is what makes dictation instant
 //! (~0.6 s cold load vs ~0 warm, measured in docs/SPIKES.md).
 
+pub mod session;
+
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crossbeam_channel::{bounded, select, unbounded, Receiver, Sender, TryRecvError};
 use speakly_engine_types::Segment;
@@ -23,6 +27,11 @@ pub struct DecodeRequest {
     /// Collect per-segment timestamps (file transcription); the dictation
     /// path leaves this off and reads only `text`.
     pub with_timestamps: bool,
+    /// Superseded-partial marker: when set before the lane picks the job up,
+    /// the decode is skipped and the reply is `Err("stale")`. Streaming
+    /// dictation flags queued partials when a newer window (or the final)
+    /// arrives.
+    pub drop_if_stale: Option<Arc<AtomicBool>>,
 }
 
 pub struct DecodeOutcome {
@@ -124,6 +133,14 @@ fn stt_thread(high_rx: Receiver<Job>, low_rx: Receiver<Job>) {
                 let _ = reply.send(ensure_context(&mut contexts, &model_id, &model_path));
             }
             Job::Decode { req, reply } => {
+                if req
+                    .drop_if_stale
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::Relaxed))
+                {
+                    let _ = reply.send(Err("stale".into()));
+                    continue;
+                }
                 let outcome = ensure_context(&mut contexts, &req.model_id, &req.model_path)
                     .and_then(|_| run_decode(&contexts[&req.model_id], &req));
                 let _ = reply.send(outcome);

@@ -8,6 +8,7 @@ pub mod jobs;
 pub mod meeting;
 pub mod models;
 pub mod stt;
+pub mod vad;
 
 use std::sync::Arc;
 
@@ -48,6 +49,13 @@ pub enum EngineEvent {
     DictationState {
         phase: Phase,
         profile_id: String,
+    },
+    /// Live transcript while dictating: `committed` never changes once
+    /// emitted; `volatile` is the still-open window's best guess.
+    DictationPartial {
+        profile_id: String,
+        committed: String,
+        volatile: String,
     },
     /// A finished utterance. The app layer decides what to do with the text
     /// (translate, paste, persist) and emits its own further phases.
@@ -146,6 +154,9 @@ impl Engine {
     /// app can trigger the macOS microphone permission prompt from an explicit
     /// user action (onboarding) instead of mid-dictation.
     pub fn mic_probe(&self) -> Result<(), String> {
+        if self.dictation.is_active() {
+            return Err("dictation is in progress — try again after it finishes".into());
+        }
         let capture = crate::audio::capture::CaptureService::spawn();
         let (tx, rx) = crossbeam_channel::unbounded();
         capture.start(tx)?;

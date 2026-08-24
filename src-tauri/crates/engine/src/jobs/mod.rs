@@ -169,6 +169,7 @@ fn run_job(spec: &FileJobSpec, stt: &SttService, sink: &Arc<dyn EventSink>, canc
             audio: chunk_audio,
             audio_ctx,
             with_timestamps: true,
+            drop_if_stale: None,
         });
         match result {
             Ok(outcome) => {

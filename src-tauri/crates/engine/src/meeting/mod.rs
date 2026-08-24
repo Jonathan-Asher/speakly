@@ -217,6 +217,7 @@ impl MeetingService {
                                     audio: mix,
                                     audio_ctx,
                                     with_timestamps: false,
+                                    drop_if_stale: None,
                                 }) {
                                     Ok(out) if !out.text.is_empty() => {
                                         transcript.push(out.text.clone());

@@ -39,6 +39,18 @@ export function onDictationState(cb: (e: DictationStateEvent) => void) {
   return listen<DictationStateEvent>("dictation://state", (e) => cb(e.payload));
 }
 
+export interface DictationPartialEvent {
+  profileId: string;
+  committed: string;
+  volatile: string;
+}
+
+/** Live transcript while dictating: committed text is stable, volatile is the
+ * open window's current best guess. */
+export function onDictationPartial(cb: (e: DictationPartialEvent) => void) {
+  return listen<DictationPartialEvent>("dictation://partial", (e) => cb(e.payload));
+}
+
 export function onDictationFinal(cb: (e: DictationFinalEvent) => void) {
   return listen<DictationFinalEvent>("dictation://final", (e) => cb(e.payload));
 }

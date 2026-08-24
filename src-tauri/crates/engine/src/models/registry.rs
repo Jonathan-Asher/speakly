@@ -11,6 +11,9 @@ pub struct ModelInfo {
     pub sha256: Option<&'static str>,
     pub languages: &'static str,
     pub license: &'static str,
+    /// Auxiliary models (VAD, diarization) that the Models UI doesn't list
+    /// and settings don't track; downloaded on demand by the feature.
+    pub hidden: bool,
 }
 
 pub const REGISTRY: &[ModelInfo] = &[
@@ -22,6 +25,7 @@ pub const REGISTRY: &[ModelInfo] = &[
         sha256: None,
         languages: "Hebrew (fine-tuned), multilingual base",
         license: "Apache-2.0",
+        hidden: false,
     },
     ModelInfo {
         id: "turbo",
@@ -31,6 +35,7 @@ pub const REGISTRY: &[ModelInfo] = &[
         sha256: None,
         languages: "99 languages",
         license: "MIT",
+        hidden: false,
     },
     ModelInfo {
         id: "turbo-q8",
@@ -40,6 +45,7 @@ pub const REGISTRY: &[ModelInfo] = &[
         sha256: None,
         languages: "99 languages",
         license: "MIT",
+        hidden: false,
     },
     ModelInfo {
         id: "turbo-q5",
@@ -49,6 +55,17 @@ pub const REGISTRY: &[ModelInfo] = &[
         sha256: None,
         languages: "99 languages",
         license: "MIT",
+        hidden: false,
+    },
+    ModelInfo {
+        id: "vad-silero",
+        name: "Voice activity (Silero v5)",
+        url: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
+        size_bytes: 2_300_000,
+        sha256: None,
+        languages: "language-independent",
+        license: "MIT",
+        hidden: true,
     },
 ];
 
