@@ -31,6 +31,7 @@ pub struct MeetingOpts {
     pub model_path: String,
     pub language: String,
     pub scale_audio_ctx: bool,
+    pub diarize: Option<crate::diarize::DiarizeOpts>,
 }
 
 struct ActiveSession {
@@ -186,6 +187,12 @@ impl MeetingService {
                     let started = Instant::now();
                     let mut window_index: u64 = 0;
                     let mut transcript: Vec<String> = Vec::new();
+                    let mut segments: Vec<speakly_engine_types::Segment> = Vec::new();
+                    // System-channel audio retained for post-session speaker
+                    // identification; capped at 2 h (drop-oldest).
+                    const RETAIN_CAP: usize = (TARGET_RATE as usize) * 7200;
+                    let mut retained: Vec<f32> = Vec::new();
+                    let mut retained_dropped = false;
 
                     loop {
                         let stopping = stop.load(Ordering::Relaxed);
@@ -193,6 +200,20 @@ impl MeetingService {
                         let boundary = (window_index + 1) * WINDOW_MS;
                         if stopping || elapsed_ms >= boundary {
                             let sys_chunk = std::mem::take(&mut *sys.lock().unwrap());
+                            if opts.diarize.is_some() {
+                                retained.extend_from_slice(&sys_chunk);
+                                if retained.len() > RETAIN_CAP {
+                                    let excess = retained.len() - RETAIN_CAP;
+                                    retained.drain(..excess);
+                                    if !retained_dropped {
+                                        retained_dropped = true;
+                                        sink.emit(EngineEvent::Warning {
+                                            code: "diarize".into(),
+                                            message: "Session exceeds 2 hours — speakers are identified over the most recent 2 hours".into(),
+                                        });
+                                    }
+                                }
+                            }
                             let (mic_chunk, mic_rate) = {
                                 let mut g = mic.lock().unwrap();
                                 (std::mem::take(&mut g.0), g.1)
@@ -220,6 +241,12 @@ impl MeetingService {
                                 }) {
                                     Ok(out) if !out.text.is_empty() => {
                                         transcript.push(out.text.clone());
+                                        segments.push(speakly_engine_types::Segment {
+                                            start_ms: t0,
+                                            end_ms: t1,
+                                            speaker: None,
+                                            text: out.text.clone(),
+                                        });
                                         sink.emit(EngineEvent::MeetingSegment {
                                             session_id,
                                             t0_ms: t0,
@@ -242,10 +269,43 @@ impl MeetingService {
                                     state: "stopped".into(),
                                     message: None,
                                 });
+                                if let Some(diar) = &opts.diarize {
+                                    if !segments.is_empty() && !retained.is_empty() {
+                                        sink.emit(EngineEvent::MeetingStatus {
+                                            session_id,
+                                            state: "diarizing".into(),
+                                            message: None,
+                                        });
+                                        match crate::diarize::diarize(
+                                            &retained,
+                                            std::path::Path::new(&diar.seg_model_path),
+                                            std::path::Path::new(&diar.emb_model_path),
+                                            diar.num_speakers,
+                                        ) {
+                                            Ok(turns) => {
+                                                crate::diarize::merge::assign_speakers(
+                                                    &mut segments,
+                                                    &turns,
+                                                );
+                                                sink.emit(EngineEvent::MeetingRelabeled {
+                                                    session_id,
+                                                    segments: segments.clone(),
+                                                });
+                                            }
+                                            Err(message) => {
+                                                sink.emit(EngineEvent::Warning {
+                                                    code: "diarize".into(),
+                                                    message,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
                                 sink.emit(EngineEvent::MeetingFinished {
                                     session_id,
                                     text: transcript.join("\n"),
                                     duration_ms: elapsed_ms,
+                                    segments,
                                 });
                                 return;
                             }

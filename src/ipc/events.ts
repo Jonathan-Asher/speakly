@@ -129,6 +129,44 @@ export function onJobCancelled(cb: (e: { id: string }) => void) {
   return listen<{ id: string }>("job://cancelled", (e) => cb(e.payload));
 }
 
+export interface JobSegmentsRelabeledEvent {
+  id: string;
+  segments: TranscriptSegment[];
+}
+
+export function onJobSegmentsRelabeled(cb: (e: JobSegmentsRelabeledEvent) => void) {
+  return listen<JobSegmentsRelabeledEvent>("job://segments-relabeled", (e) =>
+    cb(e.payload),
+  );
+}
+
+export interface JobPersistedEvent {
+  id: string;
+  transcriptId: number;
+}
+
+export function onJobPersisted(cb: (e: JobPersistedEvent) => void) {
+  return listen<JobPersistedEvent>("job://persisted", (e) => cb(e.payload));
+}
+
+export interface MeetingRelabeledEvent {
+  sessionId: number;
+  segments: TranscriptSegment[];
+}
+
+export function onMeetingRelabeled(cb: (e: MeetingRelabeledEvent) => void) {
+  return listen<MeetingRelabeledEvent>("meeting://relabeled", (e) => cb(e.payload));
+}
+
+export interface MeetingPersistedEvent {
+  sessionId: number;
+  transcriptId: number;
+}
+
+export function onMeetingPersisted(cb: (e: MeetingPersistedEvent) => void) {
+  return listen<MeetingPersistedEvent>("meeting://persisted", (e) => cb(e.payload));
+}
+
 export interface MeetingSegmentEvent {
   sessionId: number;
   t0Ms: number;
@@ -139,7 +177,7 @@ export interface MeetingSegmentEvent {
 
 export interface MeetingStatusEvent {
   sessionId: number;
-  state: "starting" | "live" | "stopped" | "error";
+  state: "starting" | "live" | "stopped" | "diarizing" | "error";
   message: string | null;
 }
 

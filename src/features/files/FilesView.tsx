@@ -31,8 +31,10 @@ export function FilesView() {
   const jobs = useJobsStore((s) => s.jobs);
   const order = useJobsStore((s) => s.order);
   const selectedId = useJobsStore((s) => s.selectedId);
-  const optionsRef = useRef({ language, modelId });
-  optionsRef.current = { language, modelId };
+  const [diarize, setDiarize] = useState(false);
+  const [numSpeakers, setNumSpeakers] = useState<number | null>(null);
+  const optionsRef = useRef({ language, modelId, diarize, numSpeakers });
+  optionsRef.current = { language, modelId, diarize, numSpeakers };
 
   useEffect(() => {
     attachJobEvents();
@@ -61,7 +63,7 @@ export function FilesView() {
   }, []);
 
   const queuePaths = async (paths: string[]) => {
-    const { language, modelId } = optionsRef.current;
+    const { language, modelId, diarize, numSpeakers } = optionsRef.current;
     if (!paths.length) return;
     if (!modelId) {
       setQueueError("Install a model in Models first.");
@@ -73,6 +75,8 @@ export function FilesView() {
         paths,
         language,
         modelId,
+        diarize,
+        numSpeakers,
       });
       useJobsStore.getState().addQueued(
         ids.map((id, i) => ({ id, path: paths[i], language, modelId })),
@@ -143,6 +147,33 @@ export function FilesView() {
               <option value="">No models installed</option>
             )}
           </select>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={diarize}
+              onChange={(e) => setDiarize(e.target.checked)}
+            />
+            Identify speakers
+          </label>
+          {diarize && (
+            <select
+              value={numSpeakers ?? "auto"}
+              onChange={(e) =>
+                setNumSpeakers(e.target.value === "auto" ? null : Number(e.target.value))
+              }
+              className="rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs dark:border-neutral-700 dark:bg-neutral-800"
+            >
+              <option value="auto">Auto count</option>
+              {[2, 3, 4, 5, 6].map((n) => (
+                <option key={n} value={n}>
+                  {n} speakers
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {queueError && (

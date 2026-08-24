@@ -35,6 +35,16 @@ pub fn register(app: &AppHandle, id: &str, meta: JobMeta) {
     }
 }
 
+/// Diarization relabeled the job's segments -- swap the accumulated set so
+/// persistence (and any later reads) see speaker labels.
+pub fn replace_segments(app: &AppHandle, id: &str, segments: &[Segment]) {
+    if let Some(state) = app.try_state::<JobsState>() {
+        if let Some(entry) = state.0.lock().unwrap().get_mut(id) {
+            entry.segments = segments.to_vec();
+        }
+    }
+}
+
 pub fn on_segment(app: &AppHandle, id: &str, segment: &Segment) {
     if let Some(state) = app.try_state::<JobsState>() {
         if let Some(entry) = state.0.lock().unwrap().get_mut(id) {
@@ -71,6 +81,7 @@ pub fn on_terminal(app: &AppHandle, id: &str, done_duration_ms: Option<u64>) {
     }
 
     let app = app.clone();
+    let id = id.to_string();
     std::thread::spawn(move || {
         let Some(db) = app.try_state::<crate::db::Db>() else {
             return;
@@ -98,6 +109,11 @@ pub fn on_terminal(app: &AppHandle, id: &str, done_duration_ms: Option<u64>) {
                 if let Err(e) = crate::db::insert_segments(&conn, transcript_id, &segments) {
                     tracing::warn!("segment insert failed: {e}");
                 }
+                use tauri::Emitter;
+                let _ = app.emit(
+                    "job://persisted",
+                    serde_json::json!({ "id": id, "transcriptId": transcript_id }),
+                );
             }
             Err(e) => tracing::warn!("file transcript insert failed: {e}"),
         }

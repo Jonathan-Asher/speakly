@@ -276,6 +276,19 @@ pub fn insert_segments(
     Ok(())
 }
 
+/// Rename a speaker label across one transcript's segments.
+pub fn rename_speaker(
+    conn: &Connection,
+    transcript_id: i64,
+    from: &str,
+    to: &str,
+) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE segments SET speaker = ?3 WHERE transcript_id = ?1 AND speaker = ?2",
+        params![transcript_id, from, to],
+    )
+}
+
 pub fn set_source_path(conn: &Connection, id: i64, path: &str) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE transcripts SET source_path = ?2 WHERE id = ?1",
