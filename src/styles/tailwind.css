@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+/* Design tokens. Physical direction utilities (ml-*, pl-*, left-*) are banned
+   by lint — always use logical ones (ms-*, ps-*, start-*) so RTL works. */
+@theme {
+  --color-accent: #6366f1;
+  --color-accent-strong: #4f46e5;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-white text-neutral-900 antialiased dark:bg-neutral-900 dark:text-neutral-100;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  user-select: none;
+  cursor: default;
+}
+
+/* Transcript content is selectable, everything else app-like. */
+.selectable {
+  user-select: text;
+  cursor: text;
+}
