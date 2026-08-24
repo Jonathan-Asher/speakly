@@ -75,3 +75,8 @@ export function onModelReady(cb: (e: ModelReadyEvent) => void) {
 export function onModelError(cb: (e: ModelErrorEvent) => void) {
   return listen<ModelErrorEvent>("model://error", (e) => cb(e.payload));
 }
+
+/** Fired after any settings mutation (profile CRUD etc.); listeners refetch. */
+export function onSettingsChanged(cb: () => void) {
+  return listen("settings://changed", () => cb());
+}

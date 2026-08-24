@@ -3,7 +3,7 @@
 //! with the popover work.
 
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
 pub const TRAY_ID: &str = "speakly-tray";
@@ -21,6 +21,19 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .icon(app.default_window_icon().expect("app icon").clone())
         .icon_as_template(true)
         .menu(&menu)
+        // Left click toggles the popover; the menu stays on right click.
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                position,
+                ..
+            } = event
+            {
+                crate::popover::toggle(tray.app_handle(), position);
+            }
+        })
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => {
                 if let Some(win) = app.get_webview_window("main") {

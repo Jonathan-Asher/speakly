@@ -3,6 +3,7 @@ mod db;
 mod hud;
 mod keychain;
 mod paste;
+mod popover;
 mod settings;
 mod shortcuts;
 mod sink;
@@ -44,6 +45,11 @@ pub fn run() {
             commands::provider_key_status,
             commands::delete_provider_key,
             commands::test_translation,
+            commands::list_languages,
+            commands::upsert_profile,
+            commands::delete_profile,
+            commands::show_main_window,
+            commands::quit_app,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -64,8 +70,11 @@ pub fn run() {
             app.manage(Arc::clone(&engine));
 
             hud::ensure(&handle)?;
+            popover::ensure(&handle)?;
             tray::create(&handle)?;
-            shortcuts::register_all(&handle, Arc::clone(&engine), &loaded);
+            for err in shortcuts::register_all(&handle, Arc::clone(&engine), &loaded) {
+                tracing::warn!("hotkey registration: {err}");
+            }
 
             // Warm the default model off the main thread; first dictation is
             // then instant instead of paying the multi-second cold load.
@@ -87,6 +96,12 @@ pub fn run() {
             if window.label() == "main" {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+            // The popover dismisses itself when it loses focus.
+            if window.label() == popover::POPOVER_LABEL {
+                if let WindowEvent::Focused(false) = event {
                     let _ = window.hide();
                 }
             }

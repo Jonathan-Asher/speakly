@@ -14,6 +14,7 @@ export default defineConfig(async () => ({
       input: {
         main: resolve(__dirname, "index.html"),
         hud: resolve(__dirname, "hud.html"),
+        popover: resolve(__dirname, "popover.html"),
       },
     },
   },

@@ -12,7 +12,11 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use crate::settings::{Settings, SettingsState};
 
-pub fn register_all(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) {
+/// Register every profile's hotkey. Returns one human-readable message per
+/// profile that could not be registered (bad accelerator, or the OS refused —
+/// typically another app holds the combo).
+pub fn register_all(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -> Vec<String> {
+    let mut errors = Vec::new();
     for profile in &settings.profiles {
         let shortcut: Shortcut = match profile.hotkey.parse() {
             Ok(s) => s,
@@ -22,6 +26,10 @@ pub fn register_all(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) {
                     profile.id,
                     profile.hotkey
                 );
+                errors.push(format!(
+                    "{}: hotkey '{}' is not valid",
+                    profile.name, profile.hotkey
+                ));
                 continue;
             }
         };
@@ -47,9 +55,25 @@ pub fn register_all(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) {
             });
         match result {
             Ok(()) => tracing::info!("profile {} on {}", profile.id, profile.hotkey),
-            Err(e) => tracing::warn!("register {} failed: {e}", profile.hotkey),
+            Err(e) => {
+                tracing::warn!("register {} failed: {e}", profile.hotkey);
+                errors.push(format!(
+                    "{}: could not register '{}' ({e})",
+                    profile.name, profile.hotkey
+                ));
+            }
         }
     }
+    errors
+}
+
+/// Drop every registered hotkey and re-register from the given settings.
+/// Used after profile mutations.
+pub fn reregister(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -> Vec<String> {
+    if let Err(e) = app.global_shortcut().unregister_all() {
+        tracing::warn!("unregister_all failed: {e}");
+    }
+    register_all(app, engine, settings)
 }
 
 fn start(app: &AppHandle, engine: &Engine, profile_id: &str) {
