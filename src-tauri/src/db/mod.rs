@@ -166,7 +166,12 @@ fn fts_expr(query: &str) -> Option<String> {
     }
 }
 
-pub fn search(conn: &Connection, query: Option<&str>, page: u32) -> rusqlite::Result<Value> {
+pub fn search(
+    conn: &Connection,
+    query: Option<&str>,
+    kind: Option<&str>,
+    page: u32,
+) -> rusqlite::Result<Value> {
     let offset = page * PAGE_SIZE;
     let limit = PAGE_SIZE + 1;
     let row_to_json = |r: &rusqlite::Row<'_>| -> rusqlite::Result<Value> {
@@ -187,19 +192,20 @@ pub fn search(conn: &Connection, query: Option<&str>, page: u32) -> rusqlite::Re
             let mut stmt = conn.prepare(
                 "SELECT t.id, t.kind, t.created_at, t.duration_ms, t.language, t.text, t.translated_text
                  FROM transcripts_fts f JOIN transcripts t ON t.id = f.rowid
-                 WHERE transcripts_fts MATCH ?1
+                 WHERE transcripts_fts MATCH ?1 AND (?4 IS NULL OR t.kind = ?4)
                  ORDER BY t.created_at DESC, t.id DESC LIMIT ?2 OFFSET ?3",
             )?;
-            let rows = stmt.query_map(params![expr, limit, offset], row_to_json)?;
+            let rows = stmt.query_map(params![expr, limit, offset, kind], row_to_json)?;
             rows.collect::<rusqlite::Result<_>>()?
         }
         None => {
             let mut stmt = conn.prepare(
                 "SELECT id, kind, created_at, duration_ms, language, text, translated_text
                  FROM transcripts
+                 WHERE (?3 IS NULL OR kind = ?3)
                  ORDER BY created_at DESC, id DESC LIMIT ?1 OFFSET ?2",
             )?;
-            let rows = stmt.query_map(params![limit, offset], row_to_json)?;
+            let rows = stmt.query_map(params![limit, offset, kind], row_to_json)?;
             rows.collect::<rusqlite::Result<_>>()?
         }
     };
@@ -282,6 +288,23 @@ pub fn set_source_path(conn: &Connection, id: i64, path: &str) -> rusqlite::Resu
         params![id, path],
     )?;
     Ok(())
+}
+
+/// Timestamped segments of a file/meeting transcript, in order.
+pub fn segments_for(conn: &Connection, transcript_id: i64) -> rusqlite::Result<Vec<Value>> {
+    let mut stmt = conn.prepare(
+        "SELECT start_ms, end_ms, speaker, text FROM segments
+         WHERE transcript_id = ?1 ORDER BY idx",
+    )?;
+    let rows = stmt.query_map(params![transcript_id], |r| {
+        Ok(json!({
+            "startMs": r.get::<_, i64>(0)?,
+            "endMs": r.get::<_, i64>(1)?,
+            "speaker": r.get::<_, Option<String>>(2)?,
+            "text": r.get::<_, String>(3)?,
+        }))
+    })?;
+    rows.collect()
 }
 
 /// Persist a finished dictation off the calling thread. Honors the history
@@ -387,6 +410,10 @@ mod tests {
         ];
         insert_segments(&conn, id, &segs).unwrap();
         set_source_path(&conn, id, "/tmp/a.mp3").unwrap();
+        let fetched = segments_for(&conn, id).unwrap();
+        assert_eq!(fetched.len(), 2);
+        assert_eq!(fetched[0]["text"], "שלום");
+        assert_eq!(fetched[1]["startMs"], 1500);
         let n: i64 = conn
             .query_row("SELECT count(*) FROM segments", [], |r| r.get(0))
             .unwrap();
@@ -407,16 +434,47 @@ mod tests {
     }
 
     #[test]
+    fn search_filters_by_kind() {
+        let conn = mem();
+        add(&conn, "רשומת הכתבה");
+        insert_transcript(
+            &conn,
+            "file",
+            None,
+            None,
+            Some("he"),
+            9000,
+            "תמלול קובץ",
+            None,
+        )
+        .unwrap();
+
+        let all = search(&conn, None, None, 0).unwrap();
+        assert_eq!(all["items"].as_array().unwrap().len(), 2);
+
+        let files = search(&conn, None, Some("file"), 0).unwrap();
+        let items = files["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["kind"], "file");
+
+        // Kind filter composes with FTS.
+        let hits = search(&conn, Some("תמלול"), Some("dictation"), 0).unwrap();
+        assert_eq!(hits["items"].as_array().unwrap().len(), 0);
+        let hits = search(&conn, Some("תמלול"), Some("file"), 0).unwrap();
+        assert_eq!(hits["items"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
     fn hebrew_search_matches_prefix() {
         let conn = mem();
         add(&conn, "שלום עולם, זוהי בדיקה");
         add(&conn, "an english entry");
-        let out = search(&conn, Some("שלום"), 0).unwrap();
+        let out = search(&conn, Some("שלום"), None, 0).unwrap();
         let items = out["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert!(items[0]["text"].as_str().unwrap().contains("שלום עולם"));
         // Prefix of a longer word also matches.
-        let out = search(&conn, Some("בדיק"), 0).unwrap();
+        let out = search(&conn, Some("בדיק"), None, 0).unwrap();
         assert_eq!(out["items"].as_array().unwrap().len(), 1);
     }
 
@@ -426,10 +484,10 @@ mod tests {
         for i in 0..(PAGE_SIZE + 10) {
             add(&conn, &format!("entry number {i}"));
         }
-        let page0 = search(&conn, None, 0).unwrap();
+        let page0 = search(&conn, None, None, 0).unwrap();
         assert_eq!(page0["items"].as_array().unwrap().len(), PAGE_SIZE as usize);
         assert!(page0["hasMore"].as_bool().unwrap());
-        let page1 = search(&conn, None, 1).unwrap();
+        let page1 = search(&conn, None, None, 1).unwrap();
         assert_eq!(page1["items"].as_array().unwrap().len(), 10);
         assert!(!page1["hasMore"].as_bool().unwrap());
     }
@@ -440,12 +498,12 @@ mod tests {
         let id = add(&conn, "מחיקה ראשונה");
         add(&conn, "מחיקה שניה");
         delete(&conn, id).unwrap();
-        let out = search(&conn, Some("מחיקה"), 0).unwrap();
+        let out = search(&conn, Some("מחיקה"), None, 0).unwrap();
         assert_eq!(out["items"].as_array().unwrap().len(), 1);
         clear(&conn).unwrap();
-        let out = search(&conn, Some("מחיקה"), 0).unwrap();
+        let out = search(&conn, Some("מחיקה"), None, 0).unwrap();
         assert_eq!(out["items"].as_array().unwrap().len(), 0);
-        let out = search(&conn, None, 0).unwrap();
+        let out = search(&conn, None, None, 0).unwrap();
         assert_eq!(out["items"].as_array().unwrap().len(), 0);
     }
 
@@ -462,7 +520,7 @@ mod tests {
         .unwrap();
         let removed = purge_older_than(&conn, 7).unwrap();
         assert_eq!(removed, 1);
-        let out = search(&conn, None, 0).unwrap();
+        let out = search(&conn, None, None, 0).unwrap();
         let items = out["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert!(items[0]["text"].as_str().unwrap().contains("טרי"));

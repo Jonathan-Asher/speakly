@@ -162,7 +162,13 @@ export function ProfileEditor({
             />
           </Row>
           <Row label="Hotkey">
-            <HotkeyRecorder value={draft.hotkey} onChange={(hotkey) => set({ hotkey })} />
+            <div className="flex flex-col gap-1">
+              <HotkeyRecorder value={draft.hotkey} onChange={(hotkey) => set({ hotkey })} />
+              <span className="text-xs text-neutral-400">
+                Combos work everywhere; a lone Right ⌥/⌘ hold needs the
+                Accessibility permission.
+              </span>
+            </div>
           </Row>
           <Row label="Mode">
             <select

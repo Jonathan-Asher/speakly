@@ -81,12 +81,42 @@ pub fn get_model_status(state: State<'_, SettingsState>) -> Value {
 }
 
 #[tauri::command]
-pub fn history_search(app: AppHandle, query: Option<String>, page: u32) -> Result<Value, String> {
+pub fn history_search(
+    app: AppHandle,
+    query: Option<String>,
+    kind: Option<String>,
+    page: u32,
+) -> Result<Value, String> {
     let db = app
         .try_state::<crate::db::Db>()
         .ok_or("history unavailable")?;
     let conn = db.0.lock().unwrap();
-    crate::db::search(&conn, query.as_deref(), page).map_err(|e| e.to_string())
+    crate::db::search(&conn, query.as_deref(), kind.as_deref(), page).map_err(|e| e.to_string())
+}
+
+/// Timestamped (and speaker-labeled, when present) segments of a stored
+/// file/meeting transcript.
+#[tauri::command]
+pub fn history_segments(app: AppHandle, transcript_id: i64) -> Result<Vec<Value>, String> {
+    let db = app
+        .try_state::<crate::db::Db>()
+        .ok_or("history unavailable")?;
+    let conn = db.0.lock().unwrap();
+    crate::db::segments_for(&conn, transcript_id).map_err(|e| e.to_string())
+}
+
+/// Write frontend-rendered binary export data (docx/pdf) to a path the user
+/// picked in the save dialog. Provenance of `path` cannot be proven here —
+/// the trade-off (vs. an fs-scope dance) is documented in the plan; the
+/// command writes only regular files and never creates directories.
+#[tauri::command]
+pub fn write_binary_file(path: String, base64_data: String) -> Result<(), String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_data.as_bytes())
+        .map_err(|e| format!("decode: {e}"))?;
+    std::fs::write(&path, bytes).map_err(|e| format!("write: {e}"))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -110,6 +140,19 @@ pub fn history_clear(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn accessibility_status() -> bool {
     accessibility_trusted()
+}
+
+/// QA probe: the HUD must never be the key window (it would steal the paste
+/// target's focus). Checked on the main thread.
+#[tauri::command]
+pub fn hud_is_key(app: AppHandle) -> Result<bool, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        let _ = tx.send(crate::hud::is_key_window(&handle));
+    })
+    .map_err(|e| e.to_string())?;
+    rx.recv().map_err(|e| e.to_string())
 }
 
 /// The one list of transcription languages, served from Rust.
@@ -523,10 +566,19 @@ pub fn upsert_profile(
     if profile.language.trim().is_empty() {
         return Err("Pick a language".into());
     }
-    let parsed: Shortcut = profile
-        .hotkey
-        .parse()
-        .map_err(|_| format!("'{}' is not a usable hotkey", profile.hotkey))?;
+    // Bare-modifier specs ("RightOption" etc.) are valid but live outside the
+    // plugin's accelerator grammar; combos must parse.
+    let is_bare = crate::modifier_tap::parse_bare(&profile.hotkey).is_some();
+    let parsed: Option<Shortcut> = if is_bare {
+        None
+    } else {
+        Some(
+            profile
+                .hotkey
+                .parse()
+                .map_err(|_| format!("'{}' is not a usable hotkey", profile.hotkey))?,
+        )
+    };
     if let Some(t) = profile.translate.as_ref().filter(|t| t.enabled) {
         if matches!(
             t.provider,
@@ -547,10 +599,14 @@ pub fn upsert_profile(
         }
         let clash = settings.profiles.iter().any(|p| {
             p.id != profile.id
-                && p.hotkey
-                    .parse::<Shortcut>()
-                    .map(|s| s == parsed)
-                    .unwrap_or(false)
+                && match &parsed {
+                    Some(parsed) => p
+                        .hotkey
+                        .parse::<Shortcut>()
+                        .map(|s| s == *parsed)
+                        .unwrap_or(false),
+                    None => p.hotkey == profile.hotkey,
+                }
         });
         if clash {
             return Err(format!(

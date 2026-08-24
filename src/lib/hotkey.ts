@@ -1,6 +1,20 @@
 /** Accelerator-string helpers shared by the profile UI and the popover. */
 
+/** Bare-modifier hold specs (handled by an event tap, not the plugin). */
+const BARE_PRETTY: Record<string, string> = {
+  RightOption: "⌥ right (hold)",
+  LeftOption: "⌥ left (hold)",
+  RightCommand: "⌘ right (hold)",
+  Fn: "fn (hold)",
+};
+
+export function isBareModifier(hotkey: string) {
+  return hotkey in BARE_PRETTY;
+}
+
 export function prettyHotkey(hotkey: string) {
+  const bare = BARE_PRETTY[hotkey];
+  if (bare) return bare;
   return hotkey
     .replace(/Alt/g, "⌥")
     .replace(/Shift/g, "⇧")
@@ -14,6 +28,25 @@ export function prettyHotkey(hotkey: string) {
 }
 
 const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta"]);
+
+/**
+ * Map a modifier-only keydown to a bare-hold spec ("RightOption" etc.), or
+ * null when the pressed modifier isn't one we support alone. The recorder
+ * offers this only when the modifier is pressed and released with no other
+ * key in between.
+ */
+export function bareModifierFromEvent(e: KeyboardEvent): string | null {
+  switch (e.code) {
+    case "AltRight":
+      return "RightOption";
+    case "AltLeft":
+      return "LeftOption";
+    case "MetaRight":
+      return "RightCommand";
+    default:
+      return null;
+  }
+}
 
 /**
  * Map a KeyboardEvent to the plugin's accelerator syntax

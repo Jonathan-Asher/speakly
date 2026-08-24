@@ -5,6 +5,7 @@ mod hud;
 mod jobs_state;
 mod keychain;
 mod logs;
+mod modifier_tap;
 mod paste;
 mod permissions;
 mod popover;
@@ -49,6 +50,9 @@ pub fn run() {
             commands::history_search,
             commands::history_delete,
             commands::history_clear,
+            commands::history_segments,
+            commands::write_binary_file,
+            commands::hud_is_key,
             commands::set_provider_key,
             commands::provider_key_status,
             commands::delete_provider_key,
@@ -84,6 +88,7 @@ pub fn run() {
             app.manage(SettingsState(Mutex::new(loaded.clone())));
             settings::apply_general(&handle, &loaded.general);
             app.manage(jobs_state::JobsState::default());
+            app.manage(modifier_tap::TapState::default());
 
             match db::Db::open_default(&handle) {
                 Ok(db) => {
