@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Class-strategy dark mode: the app applies `.dark` on <html> from the theme
+   setting (system|light|dark); `dark:` variants key off it. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Design tokens. Physical direction utilities (ml-*, pl-*, left-*) are banned
    by lint — always use logical ones (ms-*, ps-*, start-*) so RTL works. */
 @theme {

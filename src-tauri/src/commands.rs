@@ -21,6 +21,48 @@ pub fn get_profiles(state: State<'_, SettingsState>) -> Vec<speakly_engine_types
     state.0.lock().unwrap().profiles.clone()
 }
 
+/// Object-merge `patch` into `base` recursively; non-objects replace.
+fn deep_merge(base: &mut Value, patch: &Value) {
+    match (base, patch) {
+        (Value::Object(base_map), Value::Object(patch_map)) => {
+            for (key, value) in patch_map {
+                deep_merge(base_map.entry(key.clone()).or_insert(Value::Null), value);
+            }
+        }
+        (base_slot, replacement) => *base_slot = replacement.clone(),
+    }
+}
+
+#[tauri::command]
+pub fn get_settings_json(state: State<'_, SettingsState>) -> Result<Value, String> {
+    serde_json::to_value(&*state.0.lock().unwrap()).map_err(|e| e.to_string())
+}
+
+/// Deep-merge a JSON patch into the typed settings (the serde round-trip is
+/// the validation), persist, apply side effects, broadcast to all windows.
+#[tauri::command]
+pub fn update_settings(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    patch: Value,
+) -> Result<Value, String> {
+    let updated = {
+        let mut settings = state.0.lock().unwrap();
+        let mut merged = serde_json::to_value(&*settings).map_err(|e| e.to_string())?;
+        deep_merge(&mut merged, &patch);
+        let new: crate::settings::Settings =
+            serde_json::from_value(merged).map_err(|e| format!("invalid settings: {e}"))?;
+        *settings = new.clone();
+        crate::settings::save(&app, &settings);
+        new
+    };
+    crate::settings::apply_general(&app, &updated.general);
+    let value = serde_json::to_value(&updated).map_err(|e| e.to_string())?;
+    use tauri::Emitter;
+    let _ = app.emit("settings://changed", value.clone());
+    Ok(value)
+}
+
 #[tauri::command]
 pub fn get_model_status(state: State<'_, SettingsState>) -> Value {
     let settings = state.0.lock().unwrap();

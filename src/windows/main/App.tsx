@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { strings } from "../../lib/strings";
 import { DictationView } from "../../features/dictation/DictationView";
 import { ModelsView } from "../../features/models/ModelsView";
 import { HistoryView } from "../../features/history/HistoryView";
+import { SettingsView } from "../../features/settings/SettingsView";
+import { OnboardingWizard } from "../../features/onboarding/OnboardingWizard";
+import { attachSettings, useSettingsStore } from "../../stores/settings";
 
 type Section = keyof typeof strings.nav;
 
@@ -10,6 +13,15 @@ const sections = Object.keys(strings.nav) as Section[];
 
 export function App() {
   const [active, setActive] = useState<Section>("dictation");
+  const loaded = useSettingsStore((s) => s.loaded);
+  const onboarded = useSettingsStore((s) => s.settings?.onboarding.completed ?? false);
+
+  useEffect(() => {
+    attachSettings();
+  }, []);
+
+  if (!loaded) return null;
+  if (!onboarded) return <OnboardingWizard />;
 
   return (
     <div className="flex h-full">
@@ -36,6 +48,8 @@ export function App() {
           <ModelsView />
         ) : active === "history" ? (
           <HistoryView />
+        ) : active === "settings" ? (
+          <SettingsView />
         ) : (
           <div className="self-center text-center text-sm text-neutral-400">
             {strings.nav[active]} — coming in the next phases.

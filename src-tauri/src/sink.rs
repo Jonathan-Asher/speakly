@@ -18,7 +18,10 @@ impl AppSink {
     fn emit_state(&self, phase: &str, profile_id: &str) {
         tray::set_state(&self.app, phase);
         match phase {
-            "listening" => hud::show(&self.app),
+            "listening" => {
+                hud::show(&self.app);
+                crate::sound::play(&self.app, crate::sound::Cue::Start);
+            }
             "idle" => hud::hide(&self.app),
             _ => {}
         }
@@ -181,6 +184,7 @@ impl EventSink for AppSink {
                         translated_for_db,
                     );
                     tray::set_state(&app, "idle");
+                    crate::sound::play(&app, crate::sound::Cue::Done);
                     let _ = app.emit(
                         "dictation://final",
                         json!({

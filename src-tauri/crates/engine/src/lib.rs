@@ -92,4 +92,20 @@ impl Engine {
             models,
         }
     }
+
+    /// Open the default input for ~500 ms and close it again. Exists so the
+    /// app can trigger the macOS microphone permission prompt from an explicit
+    /// user action (onboarding) instead of mid-dictation.
+    pub fn mic_probe(&self) -> Result<(), String> {
+        let capture = crate::audio::capture::CaptureService::spawn();
+        let (tx, rx) = crossbeam_channel::unbounded();
+        capture.start(tx)?;
+        let t0 = std::time::Instant::now();
+        while t0.elapsed() < std::time::Duration::from_millis(500) {
+            // Drain so the channel never backs up; ignore contents.
+            let _ = rx.recv_timeout(std::time::Duration::from_millis(100));
+        }
+        capture.stop();
+        Ok(())
+    }
 }

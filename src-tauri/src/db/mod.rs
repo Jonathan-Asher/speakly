@@ -192,6 +192,38 @@ pub fn search(conn: &Connection, query: Option<&str>, page: u32) -> rusqlite::Re
     Ok(json!({ "items": items, "hasMore": has_more }))
 }
 
+/// Delete transcripts older than `days` days. Returns the number removed.
+pub fn purge_older_than(conn: &Connection, days: u32) -> rusqlite::Result<usize> {
+    let cutoff = now_ms() - (days as i64) * 86_400_000;
+    conn.execute(
+        "DELETE FROM transcripts WHERE created_at < ?1",
+        params![cutoff],
+    )
+}
+
+/// Honor the retention setting; no-op when retention is off or the DB is
+/// unavailable. Called at startup and daily.
+pub fn run_retention_purge(app: &AppHandle) {
+    let days = {
+        let state = app.state::<SettingsState>();
+        let settings = state.0.lock().unwrap();
+        if !settings.history.enabled {
+            return;
+        }
+        settings.history.retention_days
+    };
+    let Some(days) = days else { return };
+    let Some(db) = app.try_state::<Db>() else {
+        return;
+    };
+    let conn = db.0.lock().unwrap();
+    match purge_older_than(&conn, days) {
+        Ok(n) if n > 0 => tracing::info!("retention purge removed {n} transcripts"),
+        Err(e) => tracing::warn!("retention purge failed: {e}"),
+        _ => {}
+    }
+}
+
 pub fn delete(conn: &Connection, id: i64) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM transcripts WHERE id = ?1", params![id])?;
     Ok(())
@@ -326,6 +358,25 @@ mod tests {
         assert_eq!(out["items"].as_array().unwrap().len(), 0);
         let out = search(&conn, None, 0).unwrap();
         assert_eq!(out["items"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn purge_removes_only_old_rows() {
+        let conn = mem();
+        let old_id = add(&conn, "ישן מאוד");
+        add(&conn, "טרי לגמרי");
+        // Backdate one row by 10 days.
+        conn.execute(
+            "UPDATE transcripts SET created_at = created_at - 864000000 WHERE id = ?1",
+            params![old_id],
+        )
+        .unwrap();
+        let removed = purge_older_than(&conn, 7).unwrap();
+        assert_eq!(removed, 1);
+        let out = search(&conn, None, 0).unwrap();
+        let items = out["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(items[0]["text"].as_str().unwrap().contains("טרי"));
     }
 
     #[test]

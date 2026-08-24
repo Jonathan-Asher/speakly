@@ -23,6 +23,9 @@ pub struct HistorySettings {
     /// Dictation snippets are the most privacy-sensitive kind; separately
     /// toggleable from history as a whole.
     pub save_dictation: bool,
+    /// Days to keep transcripts; `None` = forever.
+    #[serde(default)]
+    pub retention_days: Option<u32>,
 }
 
 impl Default for HistorySettings {
@@ -30,8 +33,51 @@ impl Default for HistorySettings {
         Self {
             enabled: true,
             save_dictation: true,
+            retention_days: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneralSettings {
+    #[serde(default = "d_true")]
+    pub launch_at_login: bool,
+    #[serde(default = "d_true")]
+    pub show_dock_icon: bool,
+    #[serde(default)]
+    pub theme: Theme,
+    #[serde(default)]
+    pub sound_feedback: bool,
+}
+
+impl Default for GeneralSettings {
+    fn default() -> Self {
+        Self {
+            launch_at_login: true,
+            show_dock_icon: true,
+            theme: Theme::System,
+            sound_feedback: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OnboardingSettings {
+    #[serde(default)]
+    pub completed: bool,
+}
+
+fn d_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +88,10 @@ pub struct Settings {
     pub preload_model_id: Option<String>,
     #[serde(default)]
     pub history: HistorySettings,
+    #[serde(default)]
+    pub general: GeneralSettings,
+    #[serde(default)]
+    pub onboarding: OnboardingSettings,
 }
 
 pub struct SettingsState(pub Mutex<Settings>);
@@ -172,6 +222,35 @@ fn seed() -> Settings {
         models,
         preload_model_id: Some("he-turbo".into()),
         history: HistorySettings::default(),
+        general: GeneralSettings::default(),
+        onboarding: OnboardingSettings::default(),
+    }
+}
+
+/// Apply side effects of the general settings: Dock icon presence and
+/// launch-at-login registration. Called at startup and on every change.
+pub fn apply_general(app: &AppHandle, general: &GeneralSettings) {
+    {
+        let policy = if general.show_dock_icon {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        };
+        if let Err(e) = app.set_activation_policy(policy) {
+            tracing::warn!("activation policy: {e}");
+        }
+    }
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let autolaunch = app.autolaunch();
+        let result = if general.launch_at_login {
+            autolaunch.enable()
+        } else {
+            autolaunch.disable()
+        };
+        if let Err(e) = result {
+            tracing::warn!("autostart: {e}");
+        }
     }
 }
 

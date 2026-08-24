@@ -3,9 +3,11 @@ mod db;
 mod hud;
 mod keychain;
 mod paste;
+mod permissions;
 mod settings;
 mod shortcuts;
 mod sink;
+mod sound;
 mod translation;
 mod tray;
 
@@ -28,6 +30,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             commands::get_profiles,
             commands::get_model_status,
@@ -44,16 +50,28 @@ pub fn run() {
             commands::provider_key_status,
             commands::delete_provider_key,
             commands::test_translation,
+            commands::get_settings_json,
+            commands::update_settings,
+            permissions::check_permissions,
+            permissions::probe_microphone,
+            permissions::open_privacy_pane,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
 
             let loaded = settings::load_or_seed(&handle);
             app.manage(SettingsState(Mutex::new(loaded.clone())));
+            settings::apply_general(&handle, &loaded.general);
 
             match db::Db::open_default(&handle) {
                 Ok(db) => {
                     app.manage(db);
+                    // Retention purge at startup, then daily.
+                    let purge_handle = handle.clone();
+                    std::thread::spawn(move || loop {
+                        db::run_retention_purge(&purge_handle);
+                        std::thread::sleep(std::time::Duration::from_secs(24 * 3600));
+                    });
                 }
                 Err(e) => tracing::warn!("history db unavailable: {e}"),
             }
