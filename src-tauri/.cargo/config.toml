@@ -1,0 +1,5 @@
+# Keep the C/ObjC deployment target identical across `cargo` and `tauri build`
+# invocations so whisper-rs-sys doesn't flip-flop rebuilds, and matches the
+# bundle's minimumSystemVersion.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "13.0"

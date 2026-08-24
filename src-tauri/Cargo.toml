@@ -29,9 +29,13 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 speakly-engine = { path = "crates/engine" }
 speakly-engine-types = { path = "crates/engine-types" }
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-opener = "2"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+tauri-plugin-global-shortcut = "2"
+arboard = "3.6.1"
+core-graphics = "0.25.0"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

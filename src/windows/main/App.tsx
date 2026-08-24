@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { strings } from "../../lib/strings";
-import { DirectionalText } from "../../components/DirectionalText";
+import { DictationView } from "../../features/dictation/DictationView";
 
 type Section = keyof typeof strings.nav;
 
@@ -27,12 +27,14 @@ export function App() {
           </button>
         ))}
       </nav>
-      <main className="flex flex-1 items-center justify-center p-8">
-        <div className="text-center text-neutral-400">
-          <DirectionalText className="text-sm">
-            {strings.nav[active]} — coming together in P1.
-          </DirectionalText>
-        </div>
+      <main className="flex flex-1 justify-center overflow-y-auto p-8 pt-12">
+        {active === "dictation" ? (
+          <DictationView />
+        ) : (
+          <div className="self-center text-center text-sm text-neutral-400">
+            {strings.nav[active]} — coming in the next phases.
+          </div>
+        )}
       </main>
     </div>
   );

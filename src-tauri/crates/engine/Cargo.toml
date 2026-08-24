@@ -12,3 +12,6 @@ thiserror.workspace = true
 tracing.workspace = true
 whisper-rs = { version = "0.16.0", features = ["metal"] }
 hound = "3.5.1"
+cpal = "0.18.2"
+rubato = "0.16"
+crossbeam-channel = "0.5.16"
