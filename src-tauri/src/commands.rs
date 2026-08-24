@@ -70,6 +70,111 @@ pub fn accessibility_status() -> bool {
     accessibility_trusted()
 }
 
+/// The one list of transcription languages, served from Rust.
+#[tauri::command]
+pub fn list_languages() -> Value {
+    let langs: &[(&str, &str)] = &[
+        ("auto", "Auto-detect"),
+        ("he", "Hebrew"),
+        ("en", "English"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("pt", "Portuguese"),
+        ("zh", "Chinese"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("ru", "Russian"),
+        ("ar", "Arabic"),
+        ("hi", "Hindi"),
+    ];
+    json!(langs
+        .iter()
+        .map(|(code, label)| json!({ "code": code, "label": label }))
+        .collect::<Vec<_>>())
+}
+
+#[tauri::command]
+pub fn queue_file_jobs(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    engine: State<'_, Arc<Engine>>,
+    paths: Vec<String>,
+    language: String,
+    model_id: String,
+) -> Result<Vec<String>, String> {
+    let (model_path, scale) = {
+        let settings = state.0.lock().unwrap();
+        let entry = settings
+            .models
+            .get(&model_id)
+            .ok_or_else(|| format!("unknown model: {model_id}"))?;
+        (entry.path.clone(), entry.scale_audio_ctx)
+    };
+    if model_path.is_empty() || !std::path::Path::new(&model_path).is_file() {
+        return Err(format!(
+            "model '{model_id}' is not installed — download it in Models first"
+        ));
+    }
+
+    let mut ids = Vec::with_capacity(paths.len());
+    for path in paths {
+        let id = engine.jobs.enqueue(speakly_engine::jobs::QueueOptions {
+            path: path.clone(),
+            language: language.clone(),
+            model_id: model_id.clone(),
+            model_path: model_path.clone(),
+            scale_audio_ctx: scale,
+        });
+        crate::jobs_state::register(
+            &app,
+            &id,
+            crate::jobs_state::JobMeta {
+                path,
+                model_id: model_id.clone(),
+                language: language.clone(),
+            },
+        );
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+#[tauri::command]
+pub fn cancel_job(engine: State<'_, Arc<Engine>>, id: String) {
+    engine.jobs.cancel(&id);
+}
+
+/// Render the given segments and save via a native dialog. Returns the saved
+/// path, or None when the user cancels.
+#[tauri::command]
+pub fn export_transcript(
+    app: AppHandle,
+    format: String,
+    suggested_name: String,
+    segments: Vec<crate::export::ExportSegment>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let content = crate::export::render(&format, &segments)?;
+    let ext = crate::export::extension(&format);
+    let picked = app
+        .dialog()
+        .file()
+        .set_file_name(format!("{suggested_name}.{ext}"))
+        .add_filter(format.to_uppercase(), &[ext])
+        .blocking_save_file();
+    let Some(file_path) = picked else {
+        return Ok(None);
+    };
+    let path = file_path
+        .into_path()
+        .map_err(|e| format!("resolve path: {e}"))?;
+    std::fs::write(&path, content).map_err(|e| format!("write: {e}"))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 fn valid_provider(provider: &str) -> Result<(), String> {
     crate::translation::parse_provider(provider)
         .map(|_| ())

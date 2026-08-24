@@ -75,3 +75,51 @@ export function onModelReady(cb: (e: ModelReadyEvent) => void) {
 export function onModelError(cb: (e: ModelErrorEvent) => void) {
   return listen<ModelErrorEvent>("model://error", (e) => cb(e.payload));
 }
+
+export interface TranscriptSegment {
+  startMs: number;
+  endMs: number;
+  speaker: string | null;
+  text: string;
+}
+
+export interface JobProgressEvent {
+  id: string;
+  stage: "decoding" | "transcribing";
+  pct: number;
+}
+
+export interface JobSegmentEvent {
+  id: string;
+  segment: TranscriptSegment;
+}
+
+export interface JobDoneEvent {
+  id: string;
+  durationMs: number;
+}
+
+export interface JobErrorEvent {
+  id: string;
+  message: string;
+}
+
+export function onJobProgress(cb: (e: JobProgressEvent) => void) {
+  return listen<JobProgressEvent>("job://progress", (e) => cb(e.payload));
+}
+
+export function onJobSegment(cb: (e: JobSegmentEvent) => void) {
+  return listen<JobSegmentEvent>("job://segment", (e) => cb(e.payload));
+}
+
+export function onJobDone(cb: (e: JobDoneEvent) => void) {
+  return listen<JobDoneEvent>("job://done", (e) => cb(e.payload));
+}
+
+export function onJobError(cb: (e: JobErrorEvent) => void) {
+  return listen<JobErrorEvent>("job://error", (e) => cb(e.payload));
+}
+
+export function onJobCancelled(cb: (e: { id: string }) => void) {
+  return listen<{ id: string }>("job://cancelled", (e) => cb(e.payload));
+}

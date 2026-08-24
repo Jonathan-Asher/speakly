@@ -4,12 +4,14 @@
 
 pub mod audio;
 pub mod dictation;
+pub mod jobs;
 pub mod models;
 pub mod stt;
 
 use std::sync::Arc;
 
 pub use dictation::{DictationEngine, DictationSpec};
+pub use jobs::FileJobService;
 pub use models::ModelService;
 pub use stt::SttService;
 
@@ -72,6 +74,26 @@ pub enum EngineEvent {
         id: String,
         message: String,
     },
+    JobProgress {
+        id: String,
+        stage: String,
+        pct: f32,
+    },
+    JobSegment {
+        id: String,
+        segment: speakly_engine_types::Segment,
+    },
+    JobDone {
+        id: String,
+        duration_ms: u64,
+    },
+    JobError {
+        id: String,
+        message: String,
+    },
+    JobCancelled {
+        id: String,
+    },
 }
 
 /// Facade owning the engine services. One per app.
@@ -79,17 +101,20 @@ pub struct Engine {
     pub stt: SttService,
     pub dictation: DictationEngine,
     pub models: ModelService,
+    pub jobs: FileJobService,
 }
 
 impl Engine {
     pub fn new(sink: Arc<dyn EventSink>) -> Self {
         let stt = SttService::spawn();
         let models = ModelService::new(Arc::clone(&sink));
+        let jobs = FileJobService::new(stt.clone(), Arc::clone(&sink));
         let dictation = DictationEngine::new(stt.clone(), sink);
         Self {
             stt,
             dictation,
             models,
+            jobs,
         }
     }
 }

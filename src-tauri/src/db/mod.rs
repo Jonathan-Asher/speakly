@@ -19,9 +19,10 @@ pub const PAGE_SIZE: u32 = 50;
 
 /// Numbered migrations; each runs in its own transaction and bumps
 /// `meta.schema_version`. Append-only — never edit a shipped entry.
-const MIGRATIONS: &[(i64, &str)] = &[(
-    1,
-    "
+const MIGRATIONS: &[(i64, &str)] = &[
+    (
+        1,
+        "
     CREATE TABLE transcripts (
         id INTEGER PRIMARY KEY,
         kind TEXT NOT NULL CHECK (kind IN ('dictation','file','meeting')),
@@ -59,7 +60,23 @@ const MIGRATIONS: &[(i64, &str)] = &[(
         VALUES (new.id, new.text, coalesce(new.translated_text, ''));
     END;
     ",
-)];
+    ),
+    (
+        2,
+        "
+    CREATE TABLE segments (
+        transcript_id INTEGER NOT NULL,
+        idx INTEGER NOT NULL,
+        start_ms INTEGER NOT NULL,
+        end_ms INTEGER NOT NULL,
+        speaker TEXT,
+        text TEXT NOT NULL,
+        PRIMARY KEY (transcript_id, idx)
+    );
+    ALTER TABLE transcripts ADD COLUMN source_path TEXT;
+    ",
+    ),
+];
 
 impl Db {
     pub fn open_default(app: &AppHandle) -> Result<Self, String> {
@@ -193,12 +210,45 @@ pub fn search(conn: &Connection, query: Option<&str>, page: u32) -> rusqlite::Re
 }
 
 pub fn delete(conn: &Connection, id: i64) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM segments WHERE transcript_id = ?1", params![id])?;
     conn.execute("DELETE FROM transcripts WHERE id = ?1", params![id])?;
     Ok(())
 }
 
 pub fn clear(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM segments", [])?;
     conn.execute("DELETE FROM transcripts", [])?;
+    Ok(())
+}
+
+/// Timestamped (and later speaker-labeled) pieces of a file/meeting transcript.
+pub fn insert_segments(
+    conn: &Connection,
+    transcript_id: i64,
+    segments: &[speakly_engine_types::Segment],
+) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare(
+        "INSERT INTO segments (transcript_id, idx, start_ms, end_ms, speaker, text)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
+    for (idx, s) in segments.iter().enumerate() {
+        stmt.execute(params![
+            transcript_id,
+            idx as i64,
+            s.start_ms as i64,
+            s.end_ms as i64,
+            s.speaker,
+            s.text,
+        ])?;
+    }
+    Ok(())
+}
+
+pub fn set_source_path(conn: &Connection, id: i64, path: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE transcripts SET source_path = ?2 WHERE id = ?1",
+        params![id, path],
+    )?;
     Ok(())
 }
 
@@ -282,7 +332,46 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(v, "1");
+        assert_eq!(v, "2");
+    }
+
+    #[test]
+    fn segments_round_trip_and_cascade_on_delete() {
+        let conn = mem();
+        let id = add(&conn, "with segments");
+        let segs = vec![
+            speakly_engine_types::Segment {
+                start_ms: 0,
+                end_ms: 1500,
+                speaker: None,
+                text: "שלום".into(),
+            },
+            speakly_engine_types::Segment {
+                start_ms: 1500,
+                end_ms: 3000,
+                speaker: None,
+                text: "עולם".into(),
+            },
+        ];
+        insert_segments(&conn, id, &segs).unwrap();
+        set_source_path(&conn, id, "/tmp/a.mp3").unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM segments", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 2);
+        let sp: String = conn
+            .query_row(
+                "SELECT source_path FROM transcripts WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(sp, "/tmp/a.mp3");
+        delete(&conn, id).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM segments", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
     }
 
     #[test]

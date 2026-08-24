@@ -1,6 +1,8 @@
 mod commands;
 mod db;
+mod export;
 mod hud;
+mod jobs_state;
 mod keychain;
 mod paste;
 mod settings;
@@ -27,6 +29,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::get_profiles,
@@ -44,12 +47,17 @@ pub fn run() {
             commands::provider_key_status,
             commands::delete_provider_key,
             commands::test_translation,
+            commands::list_languages,
+            commands::queue_file_jobs,
+            commands::cancel_job,
+            commands::export_transcript,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
 
             let loaded = settings::load_or_seed(&handle);
             app.manage(SettingsState(Mutex::new(loaded.clone())));
+            app.manage(jobs_state::JobsState::default());
 
             match db::Db::open_default(&handle) {
                 Ok(db) => {
