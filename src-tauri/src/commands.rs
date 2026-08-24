@@ -307,6 +307,103 @@ pub fn set_update_auto_check(
 }
 
 #[tauri::command]
+pub fn list_languages() -> Value {
+    // Pinned dictation languages (whisper needs a fixed language per profile).
+    let langs = [
+        ("he", "Hebrew"),
+        ("en", "English"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("pt", "Portuguese"),
+        ("ru", "Russian"),
+        ("ar", "Arabic"),
+        ("hi", "Hindi"),
+        ("zh", "Chinese"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+    ];
+    json!({
+        "languages": langs
+            .iter()
+            .map(|(code, label)| json!({ "code": code, "label": label }))
+            .collect::<Vec<_>>()
+    })
+}
+
+/// Create or update a dictation profile, persist, and re-register hotkeys.
+/// Validation failures return specific messages for inline display.
+#[tauri::command]
+pub fn upsert_profile(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    engine: State<'_, Arc<Engine>>,
+    profile: speakly_engine_types::Profile,
+) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::Shortcut;
+
+    if profile.id.trim().is_empty() {
+        return Err("Profile id missing".into());
+    }
+    if profile.name.trim().is_empty() {
+        return Err("Give the profile a name".into());
+    }
+    if profile.language.trim().is_empty() {
+        return Err("Pick a language".into());
+    }
+    let parsed: Shortcut = profile
+        .hotkey
+        .parse()
+        .map_err(|_| format!("'{}' is not a usable hotkey", profile.hotkey))?;
+    if let Some(t) = profile.translate.as_ref().filter(|t| t.enabled) {
+        if matches!(
+            t.provider,
+            speakly_engine_types::TranslationProvider::Custom
+        ) && t.endpoint.as_deref().unwrap_or("").trim().is_empty()
+        {
+            return Err("The custom provider needs an endpoint URL".into());
+        }
+        if t.target_language.trim().is_empty() {
+            return Err("Pick a target language for translation".into());
+        }
+    }
+
+    let snapshot = {
+        let mut settings = state.0.lock().unwrap();
+        if !settings.models.contains_key(&profile.model_id) {
+            return Err(format!("Unknown model '{}'", profile.model_id));
+        }
+        let clash = settings.profiles.iter().any(|p| {
+            p.id != profile.id
+                && p.hotkey
+                    .parse::<Shortcut>()
+                    .map(|s| s == parsed)
+                    .unwrap_or(false)
+        });
+        if clash {
+            return Err(format!(
+                "'{}' is already used by another profile",
+                profile.hotkey
+            ));
+        }
+        match settings.profiles.iter_mut().find(|p| p.id == profile.id) {
+            Some(existing) => *existing = profile.clone(),
+            None => settings.profiles.push(profile.clone()),
+        }
+        crate::settings::save(&app, &settings);
+        settings.clone()
+    };
+
+    let errors = crate::shortcuts::reregister(&app, Arc::clone(&engine), &snapshot);
+    let _ = tauri::Emitter::emit(&app, "settings://changed", ());
+    if let Some(e) = errors.iter().find(|e| e.contains(&profile.hotkey)) {
+        return Err(format!("Saved, but the hotkey did not take: {e}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_log_path() -> String {
     crate::logs::current_log_file()
         .unwrap_or_else(crate::logs::log_dir)
@@ -323,4 +420,45 @@ pub fn reveal_logs() -> Result<(), String> {
 #[tauri::command]
 pub fn read_log_tail(lines: u32) -> Result<String, String> {
     crate::logs::tail(lines as usize)
+}
+
+#[tauri::command]
+pub fn delete_profile(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    engine: State<'_, Arc<Engine>>,
+    id: String,
+) -> Result<(), String> {
+    let snapshot = {
+        let mut settings = state.0.lock().unwrap();
+        if settings.profiles.len() <= 1 {
+            return Err("At least one profile must remain".into());
+        }
+        let before = settings.profiles.len();
+        settings.profiles.retain(|p| p.id != id);
+        if settings.profiles.len() == before {
+            return Err("Profile not found".into());
+        }
+        crate::settings::save(&app, &settings);
+        settings.clone()
+    };
+    crate::shortcuts::reregister(&app, Arc::clone(&engine), &snapshot);
+    let _ = tauri::Emitter::emit(&app, "settings://changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn show_main_window(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    if let Some(pop) = app.get_webview_window(crate::popover::POPOVER_LABEL) {
+        let _ = pop.hide();
+    }
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
 }

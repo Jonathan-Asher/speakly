@@ -1,20 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DirectionalText } from "../../components/DirectionalText";
 import { attachDictationEvents, useDictationStore } from "../../stores/dictation";
+import { onSettingsChanged } from "../../ipc/events";
+import { prettyHotkey } from "../../lib/hotkey";
+import { newProfileDraft, ProfileEditor, type ProfileDraft } from "./ProfileEditor";
 
-interface Profile {
-  id: string;
-  name: string;
-  hotkey: string;
-  language: string;
-  model_id: string;
-  translate?: {
-    enabled: boolean;
-    provider: string;
-    target_language: string;
-  } | null;
-}
+type Profile = ProfileDraft;
 
 const PROVIDERS = [
   { id: "groq", label: "Groq" },
@@ -30,35 +22,36 @@ interface ModelStatus {
   present: boolean;
 }
 
-function prettyHotkey(hotkey: string) {
-  return hotkey
-    .replace(/Alt/g, "⌥")
-    .replace(/Shift/g, "⇧")
-    .replace(/(CommandOrControl|Command|Super)/g, "⌘")
-    .replace(/Control|Ctrl/g, "⌃")
-    .replace(/\+/g, " ");
-}
-
 export function DictationView() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [models, setModels] = useState<ModelStatus[]>([]);
   const [axTrusted, setAxTrusted] = useState<boolean | null>(null);
+  const [editor, setEditor] = useState<{ draft: ProfileDraft; isNew: boolean } | null>(null);
   const phase = useDictationStore((s) => s.phase);
   const activeProfile = useDictationStore((s) => s.profileId);
   const last = useDictationStore((s) => s.last);
   const warning = useDictationStore((s) => s.warning);
 
+  const refetchProfiles = useCallback(
+    () => void invoke<Profile[]>("get_profiles").then(setProfiles),
+    [],
+  );
+
   useEffect(() => {
     attachDictationEvents();
-    void invoke<Profile[]>("get_profiles").then(setProfiles);
+    refetchProfiles();
+    const unlisten = onSettingsChanged(refetchProfiles);
     void invoke<{ models: ModelStatus[] }>("get_model_status").then((r) =>
       setModels(r.models),
     );
     const refreshAx = () => void invoke<boolean>("accessibility_status").then(setAxTrusted);
     refreshAx();
     window.addEventListener("focus", refreshAx);
-    return () => window.removeEventListener("focus", refreshAx);
-  }, []);
+    return () => {
+      window.removeEventListener("focus", refreshAx);
+      void unlisten.then((f) => f());
+    };
+  }, [refetchProfiles]);
 
   const missingModels = models.filter((m) => !m.present);
 
@@ -105,7 +98,8 @@ export function DictationView() {
               </div>
               <div className="mt-1 flex items-center gap-1.5 text-xs text-neutral-500">
                 <span>
-                  hold to talk · {p.language} · {p.model_id}
+                  {p.mode === "toggle" ? "press to toggle" : "hold to talk"} · {p.language} ·{" "}
+                  {p.model_id}
                 </span>
                 {p.translate?.enabled && (
                   <span className="rounded-full bg-accent/10 px-1.5 py-0.5 font-medium text-accent-strong dark:text-accent">
@@ -113,15 +107,40 @@ export function DictationView() {
                   </span>
                 )}
               </div>
-              {active && (
-                <div className="mt-2 text-xs font-medium text-accent-strong dark:text-accent">
-                  {phase}…
-                </div>
-              )}
+              <div className="mt-2 flex items-center justify-between">
+                {active ? (
+                  <span className="text-xs font-medium text-accent-strong dark:text-accent">
+                    {phase}…
+                  </span>
+                ) : (
+                  <span />
+                )}
+                <button
+                  onClick={() => setEditor({ draft: { ...p }, isNew: false })}
+                  className="rounded-md px-2 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                >
+                  Edit
+                </button>
+              </div>
             </div>
           );
         })}
+        <button
+          onClick={() => setEditor({ draft: newProfileDraft(), isNew: true })}
+          className="flex min-h-24 items-center justify-center rounded-xl border border-dashed border-neutral-300 text-sm text-neutral-400 transition-colors hover:border-accent hover:text-accent-strong dark:border-neutral-700 dark:hover:text-accent"
+        >
+          + Add profile
+        </button>
       </div>
+
+      {editor && (
+        <ProfileEditor
+          initial={editor.draft}
+          isNew={editor.isNew}
+          onClose={() => setEditor(null)}
+          onSaved={refetchProfiles}
+        />
+      )}
 
       <TranslationSettings />
 
