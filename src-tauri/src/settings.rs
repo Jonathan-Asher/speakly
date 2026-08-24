@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use speakly_engine_types::{DictationMode, Profile};
+use speakly_engine_types::{DictationMode, Profile, TranslateConfig, TranslationProvider};
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,13 +44,32 @@ pub fn load_or_seed(app: &AppHandle) -> Settings {
     let path = settings_path(app);
     if let Ok(bytes) = std::fs::read(&path) {
         match serde_json::from_slice::<Settings>(&bytes) {
-            Ok(s) => return s,
+            Ok(mut s) => {
+                if migrate(&mut s) {
+                    save(app, &s);
+                }
+                return s;
+            }
             Err(e) => tracing::warn!("settings unreadable ({e}), reseeding"),
         }
     }
     let seeded = seed();
     save(app, &seeded);
     seeded
+}
+
+/// Settings written by an older build get new seeded content appended.
+/// Returns true when anything changed.
+fn migrate(s: &mut Settings) -> bool {
+    let has_translate_profile = s
+        .profiles
+        .iter()
+        .any(|p| p.id == "he-en" || p.translate.as_ref().is_some_and(|t| t.enabled));
+    if !has_translate_profile {
+        s.profiles.push(he_en_profile());
+        return true;
+    }
+    false
 }
 
 pub fn save(app: &AppHandle, settings: &Settings) {
@@ -134,9 +153,32 @@ fn seed() -> Settings {
                 auto_paste: true,
                 restore_clipboard: true,
             },
+            he_en_profile(),
         ],
         models,
         preload_model_id: Some("he-turbo".into()),
+    }
+}
+
+/// The signature Speakly flow: dictate Hebrew, English lands at the cursor.
+fn he_en_profile() -> Profile {
+    Profile {
+        id: "he-en".into(),
+        name: "Hebrew → English".into(),
+        hotkey: "Ctrl+Alt+Space".into(),
+        mode: DictationMode::Hold,
+        language: "he".into(),
+        model_id: "he-turbo".into(),
+        translate: Some(TranslateConfig {
+            enabled: true,
+            provider: TranslationProvider::Groq,
+            target_language: "English".into(),
+            system_prompt: None,
+            model: None,
+            endpoint: None,
+        }),
+        auto_paste: true,
+        restore_clipboard: true,
     }
 }
 
