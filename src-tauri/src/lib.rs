@@ -1,10 +1,12 @@
 mod commands;
 mod db;
 mod hud;
+mod keychain;
 mod paste;
 mod settings;
 mod shortcuts;
 mod sink;
+mod translation;
 mod tray;
 
 use std::sync::{Arc, Mutex};
@@ -38,6 +40,10 @@ pub fn run() {
             commands::history_search,
             commands::history_delete,
             commands::history_clear,
+            commands::set_provider_key,
+            commands::provider_key_status,
+            commands::delete_provider_key,
+            commands::test_translation,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

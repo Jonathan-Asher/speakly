@@ -89,14 +89,63 @@ impl EventSink for AppSink {
                 decode_ms,
                 latency_ms,
             } => {
-                let (auto_paste, restore) = {
+                let (auto_paste, restore, translate_cfg) = {
                     let state = self.app.state::<SettingsState>();
                     let settings = state.0.lock().unwrap();
                     settings
                         .profile(&profile_id)
-                        .map(|p| (p.auto_paste, p.restore_clipboard))
-                        .unwrap_or((true, true))
+                        .map(|p| (p.auto_paste, p.restore_clipboard, p.translate.clone()))
+                        .unwrap_or((true, true, None))
                 };
+
+                // Translation stage (He→En etc.) — runs on this engine thread,
+                // never the main thread. Failure pastes the untranslated source.
+                let mut final_text = text.clone();
+                let mut translated = false;
+                let mut translated_provider: Option<String> = None;
+                let mut translate_ms: Option<u64> = None;
+                if let Some(cfg) = translate_cfg.filter(|c| c.enabled) {
+                    self.emit_state("translating", &profile_id);
+                    let slug = crate::translation::provider_slug(cfg.provider);
+                    let key = crate::keychain::get_key(slug)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    let is_custom = matches!(
+                        cfg.provider,
+                        speakly_engine_types::TranslationProvider::Custom
+                    );
+                    if key.is_empty() && !is_custom {
+                        let _ = self.app.emit(
+                            "engine://warning",
+                            json!({
+                                "code": "translate",
+                                "message": format!("No API key saved for {slug} — pasted the original text"),
+                            }),
+                        );
+                    } else {
+                        let t0 = std::time::Instant::now();
+                        match crate::translation::translate(&cfg, &key, &final_text) {
+                            Ok(t) => {
+                                translate_ms = Some(t0.elapsed().as_millis() as u64);
+                                final_text = t;
+                                translated = true;
+                                translated_provider = Some(slug.to_string());
+                            }
+                            Err(e) => {
+                                translate_ms = Some(t0.elapsed().as_millis() as u64);
+                                tracing::warn!("translation failed: {e}");
+                                let _ = self.app.emit(
+                                    "engine://warning",
+                                    json!({
+                                        "code": "translate",
+                                        "message": format!("Translation failed ({e}) — pasted the original text"),
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                }
 
                 self.emit_state("pasting", &profile_id);
 
@@ -104,7 +153,7 @@ impl EventSink for AppSink {
                 let pid = profile_id.clone();
                 let _ = self.app.run_on_main_thread(move || {
                     let outcome = if auto_paste {
-                        paste_text(&app, &text, restore)
+                        paste_text(&app, &final_text, restore)
                     } else {
                         PasteOutcome::ClipboardOnly
                     };
@@ -119,19 +168,31 @@ impl EventSink for AppSink {
                             ("copied", Some("Paste failed — text is on the clipboard"))
                         }
                     };
-                    // Persist the finished dictation (history); no-op when disabled.
-                    crate::db::persist_dictation(&app, &pid, &text, utterance_ms, None);
+                    // Persist the finished dictation (history); the source text
+                    // is the transcript, the translation rides along.
+                    let translated_for_db = translated_provider
+                        .as_ref()
+                        .map(|p| (final_text.clone(), p.clone()));
+                    crate::db::persist_dictation(
+                        &app,
+                        &pid,
+                        &text,
+                        utterance_ms,
+                        translated_for_db,
+                    );
                     tray::set_state(&app, "idle");
                     let _ = app.emit(
                         "dictation://final",
                         json!({
                             "profileId": pid,
-                            "text": text,
+                            "text": final_text,
                             "phase": phase,
                             "note": note,
                             "utteranceMs": utterance_ms,
                             "decodeMs": decode_ms,
                             "latencyMs": latency_ms,
+                            "translateMs": translate_ms,
+                            "translated": translated,
                         }),
                     );
                     let _ = app.emit(
