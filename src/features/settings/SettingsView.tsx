@@ -7,6 +7,9 @@ import {
 } from "../../ipc/settings";
 import { patchSettings, useSettingsStore } from "../../stores/settings";
 import { strings } from "../../lib/strings";
+import { UpdatesCard } from "./UpdatesCard";
+import { DiagnosticsCard } from "./DiagnosticsCard";
+import { AcknowledgementsCard } from "./AcknowledgementsCard";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -192,6 +195,10 @@ export function SettingsView() {
           text to the provider you configured.
         </p>
       </Card>
+
+      <UpdatesCard />
+      <DiagnosticsCard />
+      <AcknowledgementsCard />
     </div>
   );
 }

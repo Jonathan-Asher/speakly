@@ -44,3 +44,6 @@ keyring = { version = "3", features = ["apple-native"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls", "json"] }
 tauri-plugin-autostart = "2"
 objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMediaFormat"] }
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"
+tracing-appender = "0.2.5"

@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod hud;
 mod keychain;
+mod logs;
 mod paste;
 mod permissions;
 mod settings;
@@ -14,21 +15,19 @@ mod tray;
 use std::sync::{Arc, Mutex};
 
 use speakly_engine::Engine;
-use tauri::{Manager, WindowEvent};
+use tauri::{Emitter, Manager, WindowEvent};
 
 use crate::settings::SettingsState;
 use crate::sink::AppSink;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
+    logs::init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -55,6 +54,11 @@ pub fn run() {
             permissions::check_permissions,
             permissions::probe_microphone,
             permissions::open_privacy_pane,
+            commands::engine_info,
+            commands::set_update_auto_check,
+            commands::get_log_path,
+            commands::reveal_logs,
+            commands::read_log_tail,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -84,6 +88,29 @@ pub fn run() {
             hud::ensure(&handle)?;
             tray::create(&handle)?;
             shortcuts::register_all(&handle, Arc::clone(&engine), &loaded);
+
+            // Background update check on launch (silent unless one is found;
+            // the UI listens for update://available).
+            if loaded.updates.auto_check {
+                let update_handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    use tauri_plugin_updater::UpdaterExt;
+                    match update_handle.updater() {
+                        Ok(updater) => match updater.check().await {
+                            Ok(Some(update)) => {
+                                tracing::info!("update available: {}", update.version);
+                                let _ = update_handle.emit(
+                                    "update://available",
+                                    serde_json::json!({ "version": update.version }),
+                                );
+                            }
+                            Ok(None) => tracing::debug!("up to date"),
+                            Err(e) => tracing::debug!("update check failed: {e}"),
+                        },
+                        Err(e) => tracing::debug!("updater unavailable: {e}"),
+                    }
+                });
+            }
 
             // Warm the default model off the main thread; first dictation is
             // then instant instead of paying the multi-second cold load.

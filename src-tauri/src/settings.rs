@@ -81,6 +81,17 @@ fn d_true() -> bool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdatesSettings {
+    pub auto_check: bool,
+}
+
+impl Default for UpdatesSettings {
+    fn default() -> Self {
+        Self { auto_check: true }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub profiles: Vec<Profile>,
     pub models: HashMap<String, ModelEntry>,
@@ -92,6 +103,8 @@ pub struct Settings {
     pub general: GeneralSettings,
     #[serde(default)]
     pub onboarding: OnboardingSettings,
+    #[serde(default)]
+    pub updates: UpdatesSettings,
 }
 
 pub struct SettingsState(pub Mutex<Settings>);
@@ -224,6 +237,7 @@ fn seed() -> Settings {
         history: HistorySettings::default(),
         general: GeneralSettings::default(),
         onboarding: OnboardingSettings::default(),
+        updates: UpdatesSettings::default(),
     }
 }
 
