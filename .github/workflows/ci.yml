@@ -31,6 +31,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: build sidecar (required by tauri externalBin validation)
+        run: bash scripts/build-sidecar.sh
       - name: rustfmt
         run: cargo fmt --check
         working-directory: src-tauri
