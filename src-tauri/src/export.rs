@@ -9,19 +9,29 @@ pub struct ExportSegment {
     pub start_ms: u64,
     #[serde(rename = "endMs")]
     pub end_ms: u64,
+    #[serde(default)]
+    pub speaker: Option<String>,
     pub text: String,
+}
+
+/// "Speaker N: text" when a speaker label exists, else just the text.
+fn spoken_line(s: &ExportSegment) -> String {
+    match s.speaker.as_deref() {
+        Some(speaker) if !speaker.is_empty() => format!("{speaker}: {}", s.text.trim()),
+        _ => s.text.trim().to_string(),
+    }
 }
 
 pub fn render(format: &str, segments: &[ExportSegment]) -> Result<String, String> {
     match format {
         "txt" => Ok(segments
             .iter()
-            .map(|s| s.text.trim())
+            .map(spoken_line)
             .collect::<Vec<_>>()
             .join("\n")),
         "md" => Ok(segments
             .iter()
-            .map(|s| format!("**[{}]** {}", fmt_mmss(s.start_ms), s.text.trim()))
+            .map(|s| format!("**[{}]** {}", fmt_mmss(s.start_ms), spoken_line(s)))
             .collect::<Vec<_>>()
             .join("\n\n")),
         "srt" => Ok(segments
@@ -33,7 +43,7 @@ pub fn render(format: &str, segments: &[ExportSegment]) -> Result<String, String
                     i + 1,
                     fmt_srt(s.start_ms),
                     fmt_srt(s.end_ms),
-                    s.text.trim()
+                    spoken_line(s)
                 )
             })
             .collect::<Vec<_>>()
@@ -42,11 +52,17 @@ pub fn render(format: &str, segments: &[ExportSegment]) -> Result<String, String
             let body = segments
                 .iter()
                 .map(|s| {
+                    let cue = match s.speaker.as_deref() {
+                        Some(speaker) if !speaker.is_empty() => {
+                            format!("<v {speaker}>{}</v>", s.text.trim())
+                        }
+                        _ => s.text.trim().to_string(),
+                    };
                     format!(
                         "{} --> {}\n{}\n",
                         fmt_vtt(s.start_ms),
                         fmt_vtt(s.end_ms),
-                        s.text.trim()
+                        cue
                     )
                 })
                 .collect::<Vec<_>>()
@@ -99,14 +115,48 @@ mod tests {
             ExportSegment {
                 start_ms: 0,
                 end_ms: 1500,
+                speaker: None,
                 text: " שלום עולם ".into(),
             },
             ExportSegment {
                 start_ms: 61_250,
                 end_ms: 3_726_040,
+                speaker: None,
                 text: "hello".into(),
             },
         ]
+    }
+
+    fn labeled() -> Vec<ExportSegment> {
+        vec![
+            ExportSegment {
+                start_ms: 0,
+                end_ms: 1000,
+                speaker: Some("Speaker 1".into()),
+                text: "hi".into(),
+            },
+            ExportSegment {
+                start_ms: 1000,
+                end_ms: 2000,
+                speaker: Some("Dana".into()),
+                text: "שלום".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn speaker_labels_render_per_format() {
+        assert_eq!(
+            render("txt", &labeled()).unwrap(),
+            "Speaker 1: hi\nDana: שלום"
+        );
+        assert!(render("srt", &labeled()).unwrap().contains("Dana: שלום"));
+        let vtt = render("vtt", &labeled()).unwrap();
+        assert!(vtt.contains("<v Speaker 1>hi</v>"));
+        assert!(vtt.contains("<v Dana>שלום</v>"));
+        assert!(render("md", &labeled())
+            .unwrap()
+            .contains("**[00:00]** Speaker 1: hi"));
     }
 
     #[test]

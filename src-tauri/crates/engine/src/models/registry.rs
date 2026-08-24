@@ -67,15 +67,38 @@ pub const REGISTRY: &[ModelInfo] = &[
         license: "MIT",
         hidden: true,
     },
+    ModelInfo {
+        id: "diar-seg",
+        name: "Speaker detection (pyannote segmentation-3.0)",
+        url: "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx",
+        size_bytes: 6_000_000,
+        sha256: None,
+        languages: "language-independent",
+        license: "MIT",
+    },
+    ModelInfo {
+        id: "diar-emb",
+        name: "Speaker voices (3D-Speaker ERes2Net)",
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+        size_bytes: 26_000_000,
+        sha256: None,
+        languages: "language-independent",
+        license: "Apache-2.0",
+    },
 ];
 
 pub fn get(id: &str) -> Option<&'static ModelInfo> {
     REGISTRY.iter().find(|m| m.id == id)
 }
 
-/// Managed on-disk name inside the app's models directory.
+/// Managed on-disk name inside the app's models directory. Whisper weights
+/// are ggml `.bin`; diarization models are ONNX.
 pub fn file_name(id: &str) -> String {
-    format!("ggml-{id}.bin")
+    if id.starts_with("diar-") {
+        format!("{id}.onnx")
+    } else {
+        format!("ggml-{id}.bin")
+    }
 }
 
 #[cfg(test)]
@@ -85,7 +108,9 @@ mod tests {
     #[test]
     fn registry_lookup_and_names() {
         assert!(get("he-turbo").is_some());
+        assert!(get("diar-seg").is_some());
         assert!(get("nope").is_none());
         assert_eq!(file_name("turbo-q8"), "ggml-turbo-q8.bin");
+        assert_eq!(file_name("diar-emb"), "diar-emb.onnx");
     }
 }

@@ -3,6 +3,7 @@
 //! crate drives it and receives events through [`EventSink`].
 
 pub mod audio;
+pub mod diarize;
 pub mod dictation;
 pub mod jobs;
 pub mod meeting;
@@ -104,6 +105,11 @@ pub enum EngineEvent {
     JobCancelled {
         id: String,
     },
+    /// Diarization finished for a file job: the same segments, now labeled.
+    JobSegmentsRelabeled {
+        id: String,
+        segments: Vec<speakly_engine_types::Segment>,
+    },
     MeetingStatus {
         session_id: u64,
         state: String,
@@ -116,12 +122,19 @@ pub enum EngineEvent {
         text: String,
         source: String,
     },
-    /// Emitted once per session after the final window flush; the app layer
-    /// persists the concatenated transcript to history.
+    /// Post-session diarization finished: the meeting's window segments, now
+    /// speaker-labeled. Precedes `MeetingFinished`.
+    MeetingRelabeled {
+        session_id: u64,
+        segments: Vec<speakly_engine_types::Segment>,
+    },
+    /// Emitted once per session after the final window flush (and after any
+    /// diarization); the app layer persists transcript + segments to history.
     MeetingFinished {
         session_id: u64,
         text: String,
         duration_ms: u64,
+        segments: Vec<speakly_engine_types::Segment>,
     },
 }
 

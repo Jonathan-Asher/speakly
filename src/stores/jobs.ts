@@ -3,12 +3,21 @@ import {
   onJobCancelled,
   onJobDone,
   onJobError,
+  onJobPersisted,
   onJobProgress,
   onJobSegment,
+  onJobSegmentsRelabeled,
   type TranscriptSegment,
 } from "../ipc/events";
 
-export type JobStatus = "queued" | "decoding" | "transcribing" | "done" | "error" | "cancelled";
+export type JobStatus =
+  | "queued"
+  | "decoding"
+  | "transcribing"
+  | "diarizing"
+  | "done"
+  | "error"
+  | "cancelled";
 
 export interface FileJob {
   id: string;
@@ -20,6 +29,8 @@ export interface FileJob {
   pct: number;
   error: string | null;
   segments: TranscriptSegment[];
+  /** History row id once persisted; enables speaker renames to stick. */
+  transcriptId: number | null;
 }
 
 interface JobsStore {
@@ -56,6 +67,7 @@ export const useJobsStore = create<JobsStore>((set) => ({
           pct: 0,
           error: null,
           segments: [],
+          transcriptId: null,
         };
         order.push(e.id);
       }
@@ -113,7 +125,21 @@ export function attachJobEvents() {
       };
     });
   });
+  void onJobSegmentsRelabeled((e) => patch(e.id, { segments: e.segments }));
+  void onJobPersisted((e) => patch(e.id, { transcriptId: e.transcriptId }));
   void onJobDone((e) => patch(e.id, { status: "done", pct: 1 }));
   void onJobError((e) => patch(e.id, { status: "error", error: e.message }));
   void onJobCancelled((e) => patch(e.id, { status: "cancelled" }));
+}
+
+/** Apply a speaker rename to a job's segments in place (view state). */
+export function renameSpeakerLocal(jobId: string, from: string, to: string) {
+  useJobsStore.setState((s) => {
+    const job = s.jobs[jobId];
+    if (!job) return s;
+    const segments = job.segments.map((seg) =>
+      seg.speaker === from ? { ...seg, speaker: to } : seg,
+    );
+    return { jobs: { ...s.jobs, [jobId]: { ...job, segments } } };
+  });
 }

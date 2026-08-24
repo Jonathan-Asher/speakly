@@ -130,6 +130,22 @@ impl EventSink for AppSink {
                 crate::jobs_state::on_terminal(&self.app, &id, None);
                 let _ = self.app.emit("job://cancelled", json!({ "id": id }));
             }
+            EngineEvent::JobSegmentsRelabeled { id, segments } => {
+                crate::jobs_state::replace_segments(&self.app, &id, &segments);
+                let _ = self.app.emit(
+                    "job://segments-relabeled",
+                    json!({ "id": id, "segments": segments_json(&segments) }),
+                );
+            }
+            EngineEvent::MeetingRelabeled {
+                session_id,
+                segments,
+            } => {
+                let _ = self.app.emit(
+                    "meeting://relabeled",
+                    json!({ "sessionId": session_id, "segments": segments_json(&segments) }),
+                );
+            }
             EngineEvent::MeetingStatus {
                 session_id,
                 state,
@@ -162,6 +178,7 @@ impl EventSink for AppSink {
                 session_id,
                 text,
                 duration_ms,
+                segments,
             } => {
                 // Persist the meeting transcript, then tell the UI it's saved.
                 let app = self.app.clone();
@@ -185,7 +202,22 @@ impl EventSink for AppSink {
                                 &text,
                                 None,
                             ) {
-                                Ok(_) => saved = true,
+                                Ok(transcript_id) => {
+                                    saved = true;
+                                    if !segments.is_empty() {
+                                        if let Err(e) = crate::db::insert_segments(
+                                            &conn,
+                                            transcript_id,
+                                            &segments,
+                                        ) {
+                                            tracing::warn!("meeting segments persist failed: {e}");
+                                        }
+                                    }
+                                    let _ = app.emit(
+                                        "meeting://persisted",
+                                        json!({ "sessionId": session_id, "transcriptId": transcript_id }),
+                                    );
+                                }
                                 Err(e) => tracing::warn!("meeting persist failed: {e}"),
                             }
                         }
@@ -333,4 +365,19 @@ fn schedule_idle(app: &AppHandle, profile_id: String, delay_ms: u64) {
             json!({ "phase": "idle", "profileId": profile_id }),
         );
     });
+}
+
+/// camelCase JSON for segment arrays crossing to the frontend.
+fn segments_json(segments: &[speakly_engine_types::Segment]) -> serde_json::Value {
+    json!(segments
+        .iter()
+        .map(|s| {
+            json!({
+                "startMs": s.start_ms,
+                "endMs": s.end_ms,
+                "speaker": s.speaker,
+                "text": s.text,
+            })
+        })
+        .collect::<Vec<_>>())
 }

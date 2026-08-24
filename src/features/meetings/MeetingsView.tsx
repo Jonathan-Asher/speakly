@@ -3,11 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { DirectionalText } from "../../components/DirectionalText";
 import {
   onMeetingFinished,
+  onMeetingPersisted,
+  onMeetingRelabeled,
   onMeetingSegment,
   onMeetingStatus,
   type MeetingSegmentEvent,
   type MeetingStatusEvent,
 } from "../../ipc/events";
+import { SpeakerChip } from "../../components/SpeakerChip";
 
 interface CapturableApp {
   bundleId: string;
@@ -22,6 +25,14 @@ interface ModelStatus {
 }
 
 const SYSTEM = "__system__";
+
+/** Display row: live windows have no speaker; relabeled ones may. */
+interface Row {
+  t0Ms: number;
+  t1Ms: number;
+  text: string;
+  speaker: string | null;
+}
 
 function fmtTime(ms: number) {
   const s = Math.floor(ms / 1000);
@@ -39,7 +50,10 @@ export function MeetingsView() {
   const [language, setLanguage] = useState("he");
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [status, setStatus] = useState<MeetingStatusEvent | null>(null);
-  const [segments, setSegments] = useState<MeetingSegmentEvent[]>([]);
+  const [segments, setSegments] = useState<Row[]>([]);
+  const [diarize, setDiarize] = useState(false);
+  const [numSpeakers, setNumSpeakers] = useState<number | null>(null);
+  const [transcriptId, setTranscriptId] = useState<number | null>(null);
   const [savedNote, setSavedNote] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pinned, setPinned] = useState(true);
@@ -57,8 +71,11 @@ export function MeetingsView() {
       setModels(r.models.filter((m) => m.present)),
     );
     const subs = [
-      onMeetingSegment((e) => {
-        setSegments((prev) => [...prev, e]);
+      onMeetingSegment((e: MeetingSegmentEvent) => {
+        setSegments((prev) => [
+          ...prev,
+          { t0Ms: e.t0Ms, t1Ms: e.t1Ms, text: e.text, speaker: null },
+        ]);
         if (pinnedRef.current) {
           requestAnimationFrame(() => {
             scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -69,6 +86,17 @@ export function MeetingsView() {
         setStatus(e);
         if (e.state === "error") setError(e.message ?? "capture failed");
       }),
+      onMeetingRelabeled((e) => {
+        setSegments(
+          e.segments.map((s) => ({
+            t0Ms: s.startMs,
+            t1Ms: s.endMs,
+            text: s.text,
+            speaker: s.speaker,
+          })),
+        );
+      }),
+      onMeetingPersisted((e) => setTranscriptId(e.transcriptId)),
       onMeetingFinished((e) => {
         setSessionId(null);
         if (e.saved) setSavedNote(true);
@@ -98,6 +126,7 @@ export function MeetingsView() {
     setError(null);
     setSavedNote(false);
     setSegments([]);
+    setTranscriptId(null);
     try {
       const id = await invoke<number>("meeting_start", {
         args: {
@@ -106,6 +135,8 @@ export function MeetingsView() {
           mic,
           model_id: modelId,
           language,
+          diarize,
+          num_speakers: numSpeakers,
         },
       });
       setSessionId(id);
@@ -195,6 +226,32 @@ export function MeetingsView() {
           />
           Include my microphone
         </label>
+        <label className="mb-1.5 flex items-center gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+          <input
+            type="checkbox"
+            checked={diarize}
+            onChange={(e) => setDiarize(e.target.checked)}
+            disabled={running}
+          />
+          Identify speakers
+        </label>
+        {diarize && (
+          <select
+            value={numSpeakers ?? "auto"}
+            onChange={(e) =>
+              setNumSpeakers(e.target.value === "auto" ? null : Number(e.target.value))
+            }
+            disabled={running}
+            className="mb-1.5 rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+          >
+            <option value="auto">Auto count</option>
+            {[2, 3, 4, 5, 6].map((n) => (
+              <option key={n} value={n}>
+                {n} speakers
+              </option>
+            ))}
+          </select>
+        )}
         <div className="ms-auto">
           {!running ? (
             <button
@@ -223,7 +280,11 @@ export function MeetingsView() {
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
             <span className="relative inline-flex size-2 rounded-full bg-red-500" />
           </span>
-          {status?.state === "live" ? "Capturing — transcript updates every 15s" : "Starting…"}
+          {status?.state === "diarizing"
+            ? "Identifying speakers…"
+            : status?.state === "live"
+              ? "Capturing — transcript updates every 15s"
+              : "Starting…"}
           <label className="ms-auto flex items-center gap-1.5 text-xs">
             <input
               type="checkbox"
@@ -254,8 +315,29 @@ export function MeetingsView() {
           <div className="flex flex-col gap-3">
             {segments.map((s, i) => (
               <div key={i}>
-                <div className="mb-0.5 text-[11px] text-neutral-400">
+                <div className="mb-0.5 flex items-center gap-2 text-[11px] text-neutral-400">
                   {fmtTime(s.t0Ms)}–{fmtTime(s.t1Ms)}
+                  {s.speaker &&
+                    (i === 0 || segments[i - 1].speaker !== s.speaker) && (
+                      <SpeakerChip
+                        label={s.speaker}
+                        onRename={(to) => {
+                          const from = s.speaker!;
+                          setSegments((prev) =>
+                            prev.map((row) =>
+                              row.speaker === from ? { ...row, speaker: to } : row,
+                            ),
+                          );
+                          if (transcriptId != null) {
+                            void invoke("rename_speaker", {
+                              transcriptId,
+                              from,
+                              to,
+                            }).catch(() => {});
+                          }
+                        }}
+                      />
+                    )}
                 </div>
                 <DirectionalText className="selectable text-[15px] leading-relaxed">
                   {s.text}

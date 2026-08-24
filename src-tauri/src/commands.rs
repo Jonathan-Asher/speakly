@@ -138,6 +138,7 @@ pub fn list_languages() -> Value {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn queue_file_jobs(
     app: AppHandle,
     state: State<'_, SettingsState>,
@@ -145,6 +146,8 @@ pub fn queue_file_jobs(
     paths: Vec<String>,
     language: String,
     model_id: String,
+    diarize: Option<bool>,
+    num_speakers: Option<u32>,
 ) -> Result<Vec<String>, String> {
     let (model_path, scale) = {
         let settings = state.0.lock().unwrap();
@@ -159,6 +162,11 @@ pub fn queue_file_jobs(
             "model '{model_id}' is not installed — download it in Models first"
         ));
     }
+    let diarize_opts = if diarize.unwrap_or(false) {
+        Some(diarize_opts(&app, &state, num_speakers)?)
+    } else {
+        None
+    };
 
     let mut ids = Vec::with_capacity(paths.len());
     for path in paths {
@@ -168,6 +176,7 @@ pub fn queue_file_jobs(
             model_id: model_id.clone(),
             model_path: model_path.clone(),
             scale_audio_ctx: scale,
+            diarize: diarize_opts.clone(),
         });
         crate::jobs_state::register(
             &app,
@@ -455,6 +464,50 @@ pub fn meeting_list_apps(app: AppHandle) -> Result<Value, String> {
     serde_json::from_slice::<Value>(&out.stdout).map_err(|e| format!("parse app list: {e}"))
 }
 
+/// Resolve the two diarization model files (managed dir first, then any
+/// settings-recorded path). Errors with a download hint when missing.
+fn diarize_opts(
+    app: &AppHandle,
+    state: &State<'_, SettingsState>,
+    num_speakers: Option<u32>,
+) -> Result<speakly_engine::diarize::DiarizeOpts, String> {
+    let dir = models_dir(app)?;
+    let resolve = |id: &str| -> Result<String, String> {
+        let managed = dest_path(&dir, id);
+        if managed.is_file() {
+            return Ok(managed.to_string_lossy().into_owned());
+        }
+        let settings = state.0.lock().unwrap();
+        if let Some(entry) = settings.models.get(id) {
+            if !entry.path.is_empty() && std::path::Path::new(&entry.path).is_file() {
+                return Ok(entry.path.clone());
+            }
+        }
+        Err(format!(
+            "speaker identification needs the '{id}' model — download it in Models first"
+        ))
+    };
+    Ok(speakly_engine::diarize::DiarizeOpts {
+        seg_model_path: resolve("diar-seg")?,
+        emb_model_path: resolve("diar-emb")?,
+        num_speakers: num_speakers.map(|n| n as usize),
+    })
+}
+
+#[tauri::command]
+pub fn rename_speaker(
+    app: AppHandle,
+    transcript_id: i64,
+    from: String,
+    to: String,
+) -> Result<usize, String> {
+    let db = app
+        .try_state::<crate::db::Db>()
+        .ok_or("history unavailable")?;
+    let conn = db.0.lock().unwrap();
+    crate::db::rename_speaker(&conn, transcript_id, &from, &to).map_err(|e| e.to_string())
+}
+
 #[derive(serde::Deserialize)]
 pub struct MeetingStartArgs {
     pub apps: Vec<String>,
@@ -462,6 +515,10 @@ pub struct MeetingStartArgs {
     pub mic: bool,
     pub model_id: String,
     pub language: String,
+    #[serde(default)]
+    pub diarize: bool,
+    #[serde(default)]
+    pub num_speakers: Option<u32>,
 }
 
 #[tauri::command]
@@ -480,6 +537,11 @@ pub fn meeting_start(
         }
         (model.path.clone(), model.scale_audio_ctx)
     };
+    let diarize = if args.diarize {
+        Some(diarize_opts(&app, &state, args.num_speakers)?)
+    } else {
+        None
+    };
     engine.meetings.start(speakly_engine::MeetingOpts {
         sidecar_path: sidecar.to_string_lossy().into_owned(),
         bundle_ids: args.apps,
@@ -489,6 +551,7 @@ pub fn meeting_start(
         model_path,
         language: args.language,
         scale_audio_ctx,
+        diarize,
     })
 }
 

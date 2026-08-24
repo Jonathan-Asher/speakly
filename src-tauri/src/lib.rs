@@ -70,6 +70,7 @@ pub fn run() {
             commands::quit_app,
             commands::queue_file_jobs,
             commands::cancel_job,
+            commands::rename_speaker,
             commands::export_transcript,
             commands::screen_recording_status,
             commands::open_screen_recording_settings,

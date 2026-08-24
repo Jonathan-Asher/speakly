@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 
 use crate::audio::resample::WHISPER_RATE;
+use crate::diarize::DiarizeOpts;
 use crate::audio::{decode, ffmpeg_fallback};
 use crate::stt::{scaled_audio_ctx, DecodeRequest, SttService};
 use crate::{EngineEvent, EventSink};
@@ -25,6 +26,7 @@ pub struct FileJobSpec {
     pub model_id: String,
     pub model_path: String,
     pub scale_audio_ctx: bool,
+    pub diarize: Option<DiarizeOpts>,
 }
 
 pub struct QueueOptions {
@@ -33,6 +35,7 @@ pub struct QueueOptions {
     pub model_id: String,
     pub model_path: String,
     pub scale_audio_ctx: bool,
+    pub diarize: Option<DiarizeOpts>,
 }
 
 pub struct FileJobService {
@@ -70,6 +73,7 @@ impl FileJobService {
             model_id: opts.model_id,
             model_path: opts.model_path,
             scale_audio_ctx: opts.scale_audio_ctx,
+            diarize: opts.diarize,
         });
         id
     }
@@ -152,6 +156,8 @@ fn run_job(spec: &FileJobSpec, stt: &SttService, sink: &Arc<dyn EventSink>, canc
     let total = audio.len();
     let duration_ms = (total as u64 * 1000) / WHISPER_RATE as u64;
     let chunks = chunk::split_chunks(&audio);
+    // Retained for diarization relabeling after transcription completes.
+    let mut collected: Vec<speakly_engine_types::Segment> = Vec::new();
     for range in chunks {
         if cancelled() {
             emit_cancel();
@@ -176,6 +182,7 @@ fn run_job(spec: &FileJobSpec, stt: &SttService, sink: &Arc<dyn EventSink>, canc
                 for mut segment in outcome.segments {
                     segment.start_ms += offset_ms;
                     segment.end_ms += offset_ms;
+                    collected.push(segment.clone());
                     sink.emit(EngineEvent::JobSegment {
                         id: id.clone(),
                         segment,
@@ -191,6 +198,44 @@ fn run_job(spec: &FileJobSpec, stt: &SttService, sink: &Arc<dyn EventSink>, canc
                 sink.emit(EngineEvent::JobError { id, message });
                 return;
             }
+        }
+    }
+    // Optional speaker identification over the full decoded audio (the 16 kHz
+    // buffer is retained in memory — ~115 MB per audio hour, fine for files).
+    if let Some(diar) = &spec.diarize {
+        if !collected.is_empty() {
+            if cancelled() {
+                emit_cancel();
+                return;
+            }
+            sink.emit(EngineEvent::JobProgress {
+                id: id.clone(),
+                stage: "diarizing".into(),
+                pct: 0.0,
+            });
+            match crate::diarize::diarize(
+                &audio,
+                Path::new(&diar.seg_model_path),
+                Path::new(&diar.emb_model_path),
+                diar.num_speakers,
+            ) {
+                Ok(turns) => {
+                    crate::diarize::merge::assign_speakers(&mut collected, &turns);
+                    sink.emit(EngineEvent::JobSegmentsRelabeled {
+                        id: id.clone(),
+                        segments: collected,
+                    });
+                }
+                Err(message) => sink.emit(EngineEvent::Warning {
+                    code: "diarize".into(),
+                    message,
+                }),
+            }
+            sink.emit(EngineEvent::JobProgress {
+                id: id.clone(),
+                stage: "diarizing".into(),
+                pct: 1.0,
+            });
         }
     }
     sink.emit(EngineEvent::JobDone { id, duration_ms });

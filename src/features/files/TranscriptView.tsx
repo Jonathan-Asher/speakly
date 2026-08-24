@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DirectionalText } from "../../components/DirectionalText";
-import type { FileJob } from "../../stores/jobs";
+import { SpeakerChip } from "../../components/SpeakerChip";
+import { renameSpeakerLocal, type FileJob } from "../../stores/jobs";
 
 const EXPORT_FORMATS = ["txt", "md", "srt", "vtt"] as const;
 
@@ -54,14 +55,24 @@ export function TranscriptView({ job }: { job: FileJob }) {
     window.setTimeout(() => setNotice(null), 2000);
   };
 
+  const renameSpeaker = (from: string, to: string) => {
+    renameSpeakerLocal(job.id, from, to);
+    if (job.transcriptId != null) {
+      invoke("rename_speaker", { transcriptId: job.transcriptId, from, to }).catch(
+        (e) => flash(String(e)),
+      );
+    }
+  };
+
   const doExport = async (format: string) => {
     try {
       const saved = await invoke<string | null>("export_transcript", {
         format,
         suggestedName: job.fileName.replace(/\.[^.]+$/, "") || "transcript",
-        segments: job.segments.map(({ startMs, endMs, text }) => ({
+        segments: job.segments.map(({ startMs, endMs, speaker, text }) => ({
           startMs,
           endMs,
+          speaker,
           text,
         })),
       });
@@ -116,16 +127,30 @@ export function TranscriptView({ job }: { job: FileJob }) {
           <div className="py-8 text-center text-sm text-neutral-400">No matches.</div>
         )}
         <div className="flex flex-col gap-2.5">
-          {visible.map((s, i) => (
-            <div key={`${s.startMs}-${i}`} className="flex gap-3">
-              <span className="w-12 shrink-0 pt-0.5 text-end font-mono text-xs text-neutral-400">
-                {mmss(s.startMs)}
-              </span>
-              <DirectionalText className="selectable min-w-0 flex-1 text-[15px] leading-relaxed">
-                <Highlighted text={s.text} query={query} />
-              </DirectionalText>
-            </div>
-          ))}
+          {visible.map((s, i) => {
+            const newSpeaker =
+              s.speaker != null && (i === 0 || visible[i - 1].speaker !== s.speaker);
+            return (
+              <div key={`${s.startMs}-${i}`} className="flex gap-3">
+                <span className="w-12 shrink-0 pt-0.5 text-end font-mono text-xs text-neutral-400">
+                  {mmss(s.startMs)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  {newSpeaker && s.speaker && (
+                    <div className="mb-0.5">
+                      <SpeakerChip
+                        label={s.speaker}
+                        onRename={(to) => renameSpeaker(s.speaker!, to)}
+                      />
+                    </div>
+                  )}
+                  <DirectionalText className="selectable text-[15px] leading-relaxed">
+                    <Highlighted text={s.text} query={query} />
+                  </DirectionalText>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
