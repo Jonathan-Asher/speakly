@@ -39,3 +39,4 @@ tauri-plugin-global-shortcut = "2"
 arboard = "3.6.1"
 core-graphics = "0.25.0"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }

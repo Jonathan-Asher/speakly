@@ -39,6 +39,33 @@ pub fn get_model_status(state: State<'_, SettingsState>) -> Value {
 }
 
 #[tauri::command]
+pub fn history_search(app: AppHandle, query: Option<String>, page: u32) -> Result<Value, String> {
+    let db = app
+        .try_state::<crate::db::Db>()
+        .ok_or("history unavailable")?;
+    let conn = db.0.lock().unwrap();
+    crate::db::search(&conn, query.as_deref(), page).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn history_delete(app: AppHandle, id: i64) -> Result<(), String> {
+    let db = app
+        .try_state::<crate::db::Db>()
+        .ok_or("history unavailable")?;
+    let conn = db.0.lock().unwrap();
+    crate::db::delete(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn history_clear(app: AppHandle) -> Result<(), String> {
+    let db = app
+        .try_state::<crate::db::Db>()
+        .ok_or("history unavailable")?;
+    let conn = db.0.lock().unwrap();
+    crate::db::clear(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn accessibility_status() -> bool {
     accessibility_trusted()
 }

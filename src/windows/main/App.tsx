@@ -2,6 +2,7 @@ import { useState } from "react";
 import { strings } from "../../lib/strings";
 import { DictationView } from "../../features/dictation/DictationView";
 import { ModelsView } from "../../features/models/ModelsView";
+import { HistoryView } from "../../features/history/HistoryView";
 
 type Section = keyof typeof strings.nav;
 
@@ -33,6 +34,8 @@ export function App() {
           <DictationView />
         ) : active === "models" ? (
           <ModelsView />
+        ) : active === "history" ? (
+          <HistoryView />
         ) : (
           <div className="self-center text-center text-sm text-neutral-400">
             {strings.nav[active]} — coming in the next phases.

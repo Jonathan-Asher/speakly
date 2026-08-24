@@ -1,4 +1,5 @@
 mod commands;
+mod db;
 mod hud;
 mod paste;
 mod settings;
@@ -34,12 +35,22 @@ pub fn run() {
             commands::download_model,
             commands::cancel_download,
             commands::delete_model,
+            commands::history_search,
+            commands::history_delete,
+            commands::history_clear,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
 
             let loaded = settings::load_or_seed(&handle);
             app.manage(SettingsState(Mutex::new(loaded.clone())));
+
+            match db::Db::open_default(&handle) {
+                Ok(db) => {
+                    app.manage(db);
+                }
+                Err(e) => tracing::warn!("history db unavailable: {e}"),
+            }
 
             let engine = Arc::new(Engine::new(Arc::new(AppSink {
                 app: handle.clone(),
