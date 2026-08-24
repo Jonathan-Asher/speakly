@@ -82,6 +82,8 @@ impl EventSink for AppSink {
                             ("copied", Some("Paste failed — text is on the clipboard"))
                         }
                     };
+                    // Persist the finished dictation (history); no-op when disabled.
+                    crate::db::persist_dictation(&app, &pid, &text, utterance_ms, None);
                     tray::set_state(&app, "idle");
                     let _ = app.emit(
                         "dictation://final",

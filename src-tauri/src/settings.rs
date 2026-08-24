@@ -18,11 +18,30 @@ pub struct ModelEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistorySettings {
+    pub enabled: bool,
+    /// Dictation snippets are the most privacy-sensitive kind; separately
+    /// toggleable from history as a whole.
+    pub save_dictation: bool,
+}
+
+impl Default for HistorySettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            save_dictation: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub profiles: Vec<Profile>,
     pub models: HashMap<String, ModelEntry>,
     /// Model loaded into the warm pool at app start.
     pub preload_model_id: Option<String>,
+    #[serde(default)]
+    pub history: HistorySettings,
 }
 
 pub struct SettingsState(pub Mutex<Settings>);
@@ -137,6 +156,7 @@ fn seed() -> Settings {
         ],
         models,
         preload_model_id: Some("he-turbo".into()),
+        history: HistorySettings::default(),
     }
 }
 
