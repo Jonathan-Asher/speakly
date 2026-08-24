@@ -119,6 +119,72 @@ impl EventSink for AppSink {
                 crate::jobs_state::on_terminal(&self.app, &id, None);
                 let _ = self.app.emit("job://cancelled", json!({ "id": id }));
             }
+            EngineEvent::MeetingStatus {
+                session_id,
+                state,
+                message,
+            } => {
+                let _ = self.app.emit(
+                    "meeting://status",
+                    json!({ "sessionId": session_id, "state": state, "message": message }),
+                );
+            }
+            EngineEvent::MeetingSegment {
+                session_id,
+                t0_ms,
+                t1_ms,
+                text,
+                source,
+            } => {
+                let _ = self.app.emit(
+                    "meeting://segment",
+                    json!({
+                        "sessionId": session_id,
+                        "t0Ms": t0_ms,
+                        "t1Ms": t1_ms,
+                        "text": text,
+                        "source": source,
+                    }),
+                );
+            }
+            EngineEvent::MeetingFinished {
+                session_id,
+                text,
+                duration_ms,
+            } => {
+                // Persist the meeting transcript, then tell the UI it's saved.
+                let app = self.app.clone();
+                std::thread::spawn(move || {
+                    let enabled = {
+                        let state = app.state::<SettingsState>();
+                        let settings = state.0.lock().unwrap();
+                        settings.history.enabled
+                    };
+                    let mut saved = false;
+                    if enabled && !text.is_empty() {
+                        if let Some(db) = app.try_state::<crate::db::Db>() {
+                            let conn = db.0.lock().unwrap();
+                            match crate::db::insert_transcript(
+                                &conn,
+                                "meeting",
+                                None,
+                                None,
+                                None,
+                                duration_ms as i64,
+                                &text,
+                                None,
+                            ) {
+                                Ok(_) => saved = true,
+                                Err(e) => tracing::warn!("meeting persist failed: {e}"),
+                            }
+                        }
+                    }
+                    let _ = app.emit(
+                        "meeting://finished",
+                        json!({ "sessionId": session_id, "saved": saved, "durationMs": duration_ms }),
+                    );
+                });
+            }
             EngineEvent::TranscriptReady {
                 profile_id,
                 text,

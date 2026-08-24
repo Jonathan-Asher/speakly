@@ -128,3 +128,35 @@ export function onJobError(cb: (e: JobErrorEvent) => void) {
 export function onJobCancelled(cb: (e: { id: string }) => void) {
   return listen<{ id: string }>("job://cancelled", (e) => cb(e.payload));
 }
+
+export interface MeetingSegmentEvent {
+  sessionId: number;
+  t0Ms: number;
+  t1Ms: number;
+  text: string;
+  source: string;
+}
+
+export interface MeetingStatusEvent {
+  sessionId: number;
+  state: "starting" | "live" | "stopped" | "error";
+  message: string | null;
+}
+
+export interface MeetingFinishedEvent {
+  sessionId: number;
+  saved: boolean;
+  durationMs: number;
+}
+
+export function onMeetingSegment(cb: (e: MeetingSegmentEvent) => void) {
+  return listen<MeetingSegmentEvent>("meeting://segment", (e) => cb(e.payload));
+}
+
+export function onMeetingStatus(cb: (e: MeetingStatusEvent) => void) {
+  return listen<MeetingStatusEvent>("meeting://status", (e) => cb(e.payload));
+}
+
+export function onMeetingFinished(cb: (e: MeetingFinishedEvent) => void) {
+  return listen<MeetingFinishedEvent>("meeting://finished", (e) => cb(e.payload));
+}

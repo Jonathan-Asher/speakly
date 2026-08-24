@@ -399,6 +399,98 @@ pub fn engine_info(app: AppHandle, state: State<'_, SettingsState>) -> Value {
     })
 }
 
+// ---- Meetings ----
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> u8;
+}
+
+const SIDECAR_NAME: &str = "speakly-syscap-aarch64-apple-darwin";
+
+/// Dev builds use the repo-staged binary; bundled builds the Resources copy.
+fn sidecar_path(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Ok(res) = app.path().resource_dir() {
+        let bundled = res.join(SIDECAR_NAME);
+        if bundled.is_file() {
+            return Ok(bundled);
+        }
+    }
+    let staged = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(SIDECAR_NAME);
+    if staged.is_file() {
+        return Ok(staged);
+    }
+    Err("meeting sidecar not found — run scripts/build-sidecar.sh".into())
+}
+
+#[tauri::command]
+pub fn screen_recording_status() -> bool {
+    unsafe { CGPreflightScreenCaptureAccess() != 0 }
+}
+
+#[tauri::command]
+pub fn open_screen_recording_settings() {
+    let _ = tauri_plugin_opener::open_url(
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+        None::<String>,
+    );
+}
+
+#[tauri::command]
+pub fn meeting_list_apps(app: AppHandle) -> Result<Value, String> {
+    let path = sidecar_path(&app)?;
+    let out = std::process::Command::new(&path)
+        .arg("--list-apps")
+        .output()
+        .map_err(|e| format!("run sidecar: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "sidecar exited with {:?} — is Screen Recording granted?",
+            out.status.code()
+        ));
+    }
+    serde_json::from_slice::<Value>(&out.stdout).map_err(|e| format!("parse app list: {e}"))
+}
+
+#[derive(serde::Deserialize)]
+pub struct MeetingStartArgs {
+    pub apps: Vec<String>,
+    pub system: bool,
+    pub mic: bool,
+    pub model_id: String,
+    pub language: String,
+}
+
+#[tauri::command]
+pub fn meeting_start(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    engine: State<'_, Arc<Engine>>,
+    args: MeetingStartArgs,
+) -> Result<u64, String> {
+    let sidecar = sidecar_path(&app)?;
+    let (model_path, scale_audio_ctx) = {
+        let settings = state.0.lock().unwrap();
+        let model = settings.models.get(&args.model_id).ok_or("unknown model")?;
+        if model.path.is_empty() || !std::path::Path::new(&model.path).is_file() {
+            return Err(format!("model {} is not installed", args.model_id));
+        }
+        (model.path.clone(), model.scale_audio_ctx)
+    };
+    engine.meetings.start(speakly_engine::MeetingOpts {
+        sidecar_path: sidecar.to_string_lossy().into_owned(),
+        bundle_ids: args.apps,
+        system: args.system,
+        mic: args.mic,
+        model_id: args.model_id,
+        model_path,
+        language: args.language,
+        scale_audio_ctx,
+    })
+}
+
 #[tauri::command]
 pub fn set_update_auto_check(
     app: AppHandle,
@@ -540,4 +632,9 @@ pub fn show_main_window(app: AppHandle) {
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+pub fn meeting_stop(engine: State<'_, Arc<Engine>>, session_id: u64) -> Result<(), String> {
+    engine.meetings.stop(session_id)
 }

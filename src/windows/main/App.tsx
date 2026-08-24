@@ -7,6 +7,7 @@ import { SettingsView } from "../../features/settings/SettingsView";
 import { OnboardingWizard } from "../../features/onboarding/OnboardingWizard";
 import { attachSettings, useSettingsStore } from "../../stores/settings";
 import { FilesView } from "../../features/files/FilesView";
+import { MeetingsView } from "../../features/meetings/MeetingsView";
 
 type Section = keyof typeof strings.nav;
 
@@ -53,6 +54,8 @@ export function App() {
           <HistoryView />
         ) : active === "settings" ? (
           <SettingsView />
+        ) : active === "meetings" ? (
+          <MeetingsView />
         ) : (
           <div className="self-center text-center text-sm text-neutral-400">
             {strings.nav[active]} — coming in the next phases.

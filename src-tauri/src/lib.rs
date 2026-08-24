@@ -71,6 +71,11 @@ pub fn run() {
             commands::queue_file_jobs,
             commands::cancel_job,
             commands::export_transcript,
+            commands::screen_recording_status,
+            commands::open_screen_recording_settings,
+            commands::meeting_list_apps,
+            commands::meeting_start,
+            commands::meeting_stop,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
