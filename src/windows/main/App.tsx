@@ -6,6 +6,7 @@ import { HistoryView } from "../../features/history/HistoryView";
 import { SettingsView } from "../../features/settings/SettingsView";
 import { OnboardingWizard } from "../../features/onboarding/OnboardingWizard";
 import { attachSettings, useSettingsStore } from "../../stores/settings";
+import { FilesView } from "../../features/files/FilesView";
 
 type Section = keyof typeof strings.nav;
 
@@ -44,6 +45,8 @@ export function App() {
       <main className="flex flex-1 justify-center overflow-y-auto p-8 pt-12">
         {active === "dictation" ? (
           <DictationView />
+        ) : active === "files" ? (
+          <FilesView />
         ) : active === "models" ? (
           <ModelsView />
         ) : active === "history" ? (

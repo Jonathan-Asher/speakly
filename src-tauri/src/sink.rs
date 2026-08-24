@@ -85,6 +85,40 @@ impl EventSink for AppSink {
                     .app
                     .emit("model://error", json!({ "id": id, "message": message }));
             }
+            EngineEvent::JobProgress { id, stage, pct } => {
+                let _ = self.app.emit(
+                    "job://progress",
+                    json!({ "id": id, "stage": stage, "pct": pct }),
+                );
+            }
+            EngineEvent::JobSegment { id, segment } => {
+                crate::jobs_state::on_segment(&self.app, &id, &segment);
+                let _ = self.app.emit(
+                    "job://segment",
+                    json!({ "id": id, "segment": {
+                        "startMs": segment.start_ms,
+                        "endMs": segment.end_ms,
+                        "speaker": segment.speaker,
+                        "text": segment.text,
+                    }}),
+                );
+            }
+            EngineEvent::JobDone { id, duration_ms } => {
+                crate::jobs_state::on_terminal(&self.app, &id, Some(duration_ms));
+                let _ = self
+                    .app
+                    .emit("job://done", json!({ "id": id, "durationMs": duration_ms }));
+            }
+            EngineEvent::JobError { id, message } => {
+                crate::jobs_state::on_terminal(&self.app, &id, None);
+                let _ = self
+                    .app
+                    .emit("job://error", json!({ "id": id, "message": message }));
+            }
+            EngineEvent::JobCancelled { id } => {
+                crate::jobs_state::on_terminal(&self.app, &id, None);
+                let _ = self.app.emit("job://cancelled", json!({ "id": id }));
+            }
             EngineEvent::TranscriptReady {
                 profile_id,
                 text,

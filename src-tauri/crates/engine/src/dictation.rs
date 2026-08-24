@@ -168,6 +168,7 @@ fn finalize(active: Active, stt: SttService, sink: Arc<dyn EventSink>) {
         language: spec.language.clone(),
         audio,
         audio_ctx,
+        with_timestamps: false,
     });
 
     match result {

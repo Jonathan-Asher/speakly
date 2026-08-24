@@ -17,3 +17,4 @@ rubato = "0.16"
 crossbeam-channel = "0.5.16"
 ureq = "2"
 fs2 = "0.4"
+symphonia = { version = "0.5.4", default-features = false, features = ["mp3", "aac", "isomp4", "flac", "vorbis", "ogg", "wav", "pcm", "alac", "mkv"] }

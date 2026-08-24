@@ -1,6 +1,8 @@
 mod commands;
 mod db;
+mod export;
 mod hud;
+mod jobs_state;
 mod keychain;
 mod logs;
 mod paste;
@@ -29,6 +31,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -65,6 +68,9 @@ pub fn run() {
             commands::delete_profile,
             commands::show_main_window,
             commands::quit_app,
+            commands::queue_file_jobs,
+            commands::cancel_job,
+            commands::export_transcript,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -72,6 +78,7 @@ pub fn run() {
             let loaded = settings::load_or_seed(&handle);
             app.manage(SettingsState(Mutex::new(loaded.clone())));
             settings::apply_general(&handle, &loaded.general);
+            app.manage(jobs_state::JobsState::default());
 
             match db::Db::open_default(&handle) {
                 Ok(db) => {

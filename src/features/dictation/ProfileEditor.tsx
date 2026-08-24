@@ -80,8 +80,9 @@ export function ProfileEditor({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void invoke<{ languages: Language[] }>("list_languages").then((r) =>
-      setLanguages(r.languages),
+    void invoke<Language[]>("list_languages").then((r) =>
+      // Dictation needs a pinned language; auto-detect is a file-jobs option.
+      setLanguages(r.filter((l) => l.code !== "auto")),
     );
     void invoke<{ models: ModelOption[] }>("list_models").then((r) =>
       setModels(r.models.filter((m) => m.installed)),

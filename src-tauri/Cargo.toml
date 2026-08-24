@@ -47,3 +47,4 @@ objc2-av-foundation = { version = "0.3.2", features = ["AVCaptureDevice", "AVMed
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 tracing-appender = "0.2.5"
+tauri-plugin-dialog = "2"
