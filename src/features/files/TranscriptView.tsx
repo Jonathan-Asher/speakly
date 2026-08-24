@@ -2,9 +2,13 @@ import { useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DirectionalText } from "../../components/DirectionalText";
 import { SpeakerChip } from "../../components/SpeakerChip";
+import { buildDocx } from "../../lib/exporters/docx";
+import { buildPdf } from "../../lib/exporters/pdf";
+import { saveBinary } from "../../lib/exporters/save";
 import { renameSpeakerLocal, type FileJob } from "../../stores/jobs";
 
 const EXPORT_FORMATS = ["txt", "md", "srt", "vtt"] as const;
+const RICH_FORMATS = ["docx", "pdf"] as const;
 
 function mmss(ms: number) {
   const total = Math.floor(ms / 1000);
@@ -82,6 +86,21 @@ export function TranscriptView({ job }: { job: FileJob }) {
     }
   };
 
+  const doRichExport = async (format: (typeof RICH_FORMATS)[number]) => {
+    try {
+      const name = job.fileName.replace(/\.[^.]+$/, "") || "transcript";
+      const opts = { title: name, timestamps: true };
+      const bytes =
+        format === "docx"
+          ? await buildDocx(job.segments, opts)
+          : buildPdf(job.segments, opts);
+      const saved = await saveBinary(bytes, name, format, format.toUpperCase());
+      if (saved) flash(`Saved ${format.toUpperCase()}`);
+    } catch (e) {
+      flash(String(e));
+    }
+  };
+
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="flex items-center gap-2">
@@ -103,6 +122,16 @@ export function TranscriptView({ job }: { job: FileJob }) {
           <button
             key={f}
             onClick={() => void doExport(f)}
+            disabled={job.segments.length === 0}
+            className="rounded-md border border-neutral-300 px-2.5 py-1.5 text-xs uppercase text-neutral-600 hover:bg-neutral-100 disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          >
+            {f}
+          </button>
+        ))}
+        {RICH_FORMATS.map((f) => (
+          <button
+            key={f}
+            onClick={() => void doRichExport(f)}
             disabled={job.segments.length === 0}
             className="rounded-md border border-neutral-300 px-2.5 py-1.5 text-xs uppercase text-neutral-600 hover:bg-neutral-100 disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           >

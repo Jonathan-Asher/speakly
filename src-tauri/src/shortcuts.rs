@@ -18,6 +18,17 @@ use crate::settings::{Settings, SettingsState};
 pub fn register_all(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -> Vec<String> {
     let mut errors = Vec::new();
     for profile in &settings.profiles {
+        // Bare-modifier specs (e.g. "RightOption") bypass the plugin and are
+        // handled by the flagsChanged event tap, synced below.
+        if crate::modifier_tap::parse_bare(&profile.hotkey).is_some() {
+            if !crate::paste::accessibility_trusted() {
+                errors.push(format!(
+                    "{}: '{}' needs the Accessibility permission",
+                    profile.name, profile.hotkey
+                ));
+            }
+            continue;
+        }
         let shortcut: Shortcut = match profile.hotkey.parse() {
             Ok(s) => s,
             Err(e) => {
@@ -41,14 +52,14 @@ pub fn register_all(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -
             .global_shortcut()
             .on_shortcut(shortcut, move |app, _sc, event| match (mode, event.state) {
                 (DictationMode::Hold, ShortcutState::Pressed) => {
-                    start(app, &engine, &profile_id);
+                    start_profile(app, &engine, &profile_id);
                 }
                 (DictationMode::Hold, ShortcutState::Released) => engine.dictation.stop(),
                 (DictationMode::Toggle, ShortcutState::Pressed) => {
                     if engine.dictation.is_active() {
                         engine.dictation.stop();
                     } else {
-                        start(app, &engine, &profile_id);
+                        start_profile(app, &engine, &profile_id);
                     }
                 }
                 (DictationMode::Toggle, ShortcutState::Released) => {}
@@ -64,6 +75,7 @@ pub fn register_all(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -
             }
         }
     }
+    crate::modifier_tap::sync(app, engine, &settings.profiles);
     errors
 }
 
@@ -76,7 +88,7 @@ pub fn reregister(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -> 
     register_all(app, engine, settings)
 }
 
-fn start(app: &AppHandle, engine: &Engine, profile_id: &str) {
+pub(crate) fn start_profile(app: &AppHandle, engine: &Engine, profile_id: &str) {
     let state = app.state::<SettingsState>();
     let settings = state.0.lock().unwrap();
     let Some(profile) = settings.profile(profile_id) else {
