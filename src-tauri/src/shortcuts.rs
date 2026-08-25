@@ -89,25 +89,35 @@ pub fn reregister(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -> 
 }
 
 pub(crate) fn start_profile(app: &AppHandle, engine: &Engine, profile_id: &str) {
-    let state = app.state::<SettingsState>();
-    let settings = state.0.lock().unwrap();
-    let Some(profile) = settings.profile(profile_id) else {
-        return;
+    // Resolve everything and DROP the settings lock before entering the
+    // engine: `start` emits events synchronously on this thread, and event
+    // handlers (sound cue, paste prefs) read settings — holding the guard
+    // across the call self-deadlocks the main thread.
+    let spec = {
+        let state = app.state::<SettingsState>();
+        let settings = state.0.lock().unwrap();
+        let Some(profile) = settings.profile(profile_id) else {
+            return;
+        };
+        let Some(model) = settings.models.get(&profile.model_id) else {
+            return;
+        };
+        if model.path.is_empty() {
+            tracing::warn!("model {} has no file; skipping", profile.model_id);
+            return;
+        }
+        DictationSpec {
+            profile_id: profile.id.clone(),
+            language: profile.language.clone(),
+            model_id: profile.model_id.clone(),
+            model_path: model.path.clone(),
+            scale_audio_ctx: model.scale_audio_ctx,
+            vad_model_path: None,
+        }
     };
-    let Some(model) = settings.models.get(&profile.model_id) else {
-        return;
-    };
-    if model.path.is_empty() {
-        tracing::warn!("model {} has no file; skipping", profile.model_id);
-        return;
-    }
     engine.dictation.start(DictationSpec {
-        profile_id: profile.id.clone(),
-        language: profile.language.clone(),
-        model_id: profile.model_id.clone(),
-        model_path: model.path.clone(),
-        scale_audio_ctx: model.scale_audio_ctx,
         vad_model_path: vad_model_path(app, engine),
+        ..spec
     });
 }
 

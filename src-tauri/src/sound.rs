@@ -13,9 +13,11 @@ pub enum Cue {
 }
 
 pub fn play(app: &AppHandle, cue: Cue) {
+    // try_lock: never block an event-emission path on the settings mutex —
+    // under contention (or re-entry) skipping the cue is always correct.
     let enabled = app
         .try_state::<SettingsState>()
-        .map(|s| s.0.lock().unwrap().general.sound_feedback)
+        .and_then(|s| s.0.try_lock().ok().map(|g| g.general.sound_feedback))
         .unwrap_or(false);
     if !enabled {
         return;
