@@ -85,6 +85,36 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
+            {
+                use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
+                let app_menu = Submenu::with_items(
+                    app,
+                    "Speakly",
+                    true,
+                    &[
+                        &PredefinedMenuItem::hide(app, None)?,
+                        &PredefinedMenuItem::hide_others(app, None)?,
+                        &PredefinedMenuItem::separator(app)?,
+                        &PredefinedMenuItem::quit(app, None)?,
+                    ],
+                )?;
+                let edit = Submenu::with_items(
+                    app,
+                    "Edit",
+                    true,
+                    &[
+                        &PredefinedMenuItem::undo(app, None)?,
+                        &PredefinedMenuItem::redo(app, None)?,
+                        &PredefinedMenuItem::separator(app)?,
+                        &PredefinedMenuItem::cut(app, None)?,
+                        &PredefinedMenuItem::copy(app, None)?,
+                        &PredefinedMenuItem::paste(app, None)?,
+                        &PredefinedMenuItem::select_all(app, None)?,
+                    ],
+                )?;
+                app.set_menu(Menu::with_items(app, &[&app_menu, &edit])?)?;
+            }
+
             let loaded = settings::load_or_seed(&handle);
             app.manage(SettingsState(Mutex::new(loaded.clone())));
             settings::apply_general(&handle, &loaded.general);
@@ -169,6 +199,13 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // ggml's Metal device asserts inside C++ static destructors at
+                // exit; skip them — the OS reclaims everything anyway.
+                unsafe { libc::_exit(0) };
+            }
+        });
 }

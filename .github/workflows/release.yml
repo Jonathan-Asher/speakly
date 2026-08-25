@@ -37,7 +37,7 @@ jobs:
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 8
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -66,12 +66,14 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 8
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.90.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri

@@ -28,7 +28,8 @@ pub fn init() {
 
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,tauri_plugin_updater=off".into()),
         )
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .with(
