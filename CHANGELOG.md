@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/Jonathan-Asher/speakly/compare/v1.0.1...v1.0.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* main-thread deadlock on dictation start ([f811515](https://github.com/Jonathan-Asher/speakly/commit/f811515698641e8847df19dc5c79a920e7664640))
+
 ## [1.0.1](https://github.com/Jonathan-Asher/speakly/compare/v1.0.0...v1.0.1) (2026-08-25)
 
 
