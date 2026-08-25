@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/Jonathan-Asher/speakly/compare/v1.0.0...v1.0.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* mic permission prompt reliability + local signed builds ([1e55d0d](https://github.com/Jonathan-Asher/speakly/commit/1e55d0dd361eb1b964cdd16d6100f76e434abad8))
+
 # 1.0.0 (2026-08-25)
 
 
