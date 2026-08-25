@@ -18,6 +18,12 @@ export const useSettingsStore = create<SettingsStore>(() => ({
 }));
 
 function apply(settings: AppSettings) {
+  // Guard against malformed/empty event payloads: never replace good state
+  // with garbage — refetch instead.
+  if (!settings || typeof settings !== "object" || !("general" in settings)) {
+    void getSettings().then(apply);
+    return;
+  }
   useSettingsStore.setState({ settings, loaded: true });
   applyTheme(settings.general.theme);
 }

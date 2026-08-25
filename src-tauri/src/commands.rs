@@ -687,7 +687,11 @@ pub fn upsert_profile(
     };
 
     let errors = crate::shortcuts::reregister(&app, Arc::clone(&engine), &snapshot);
-    let _ = tauri::Emitter::emit(&app, "settings://changed", ());
+    let _ = tauri::Emitter::emit(
+        &app,
+        "settings://changed",
+        serde_json::to_value(&snapshot).unwrap_or(Value::Null),
+    );
     if let Some(e) = errors.iter().find(|e| e.contains(&profile.hotkey)) {
         return Err(format!("Saved, but the hotkey did not take: {e}"));
     }
@@ -734,7 +738,11 @@ pub fn delete_profile(
         settings.clone()
     };
     crate::shortcuts::reregister(&app, Arc::clone(&engine), &snapshot);
-    let _ = tauri::Emitter::emit(&app, "settings://changed", ());
+    let _ = tauri::Emitter::emit(
+        &app,
+        "settings://changed",
+        serde_json::to_value(&snapshot).unwrap_or(Value::Null),
+    );
     Ok(())
 }
 

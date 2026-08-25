@@ -44,26 +44,10 @@ pub fn register_all(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -
                 continue;
             }
         };
-        let engine = Arc::clone(&engine);
-        let profile_id = profile.id.clone();
-        let mode = profile.mode;
-
-        let result = app
-            .global_shortcut()
-            .on_shortcut(shortcut, move |app, _sc, event| match (mode, event.state) {
-                (DictationMode::Hold, ShortcutState::Pressed) => {
-                    start_profile(app, &engine, &profile_id);
-                }
-                (DictationMode::Hold, ShortcutState::Released) => engine.dictation.stop(),
-                (DictationMode::Toggle, ShortcutState::Pressed) => {
-                    if engine.dictation.is_active() {
-                        engine.dictation.stop();
-                    } else {
-                        start_profile(app, &engine, &profile_id);
-                    }
-                }
-                (DictationMode::Toggle, ShortcutState::Released) => {}
-            });
+        // Registration only — dispatch happens in `handle_event`, which reads
+        // the profile's CURRENT mode from settings on every event. Per-shortcut
+        // closures captured the mode at registration time and could go stale.
+        let result = app.global_shortcut().register(shortcut);
         match result {
             Ok(()) => tracing::info!("profile {} on {}", profile.id, profile.hotkey),
             Err(e) => {
@@ -86,6 +70,44 @@ pub fn reregister(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -> 
         tracing::warn!("unregister_all failed: {e}");
     }
     register_all(app, engine, settings)
+}
+
+/// The plugin's single global handler: resolve the fired shortcut to a profile
+/// at event time (fresh mode, fresh settings) and drive the engine. The
+/// settings lock is dropped before any engine call — engine events run
+/// synchronously on this thread.
+pub fn handle_event(app: &AppHandle, fired: &Shortcut, state: ShortcutState) {
+    let resolved = {
+        let settings_state = app.state::<SettingsState>();
+        let settings = settings_state.0.lock().unwrap();
+        settings
+            .profiles
+            .iter()
+            .filter(|p| crate::modifier_tap::parse_bare(&p.hotkey).is_none())
+            .find(|p| {
+                p.hotkey
+                    .parse::<Shortcut>()
+                    .map(|s| s == *fired)
+                    .unwrap_or(false)
+            })
+            .map(|p| (p.id.clone(), p.mode))
+    };
+    let Some((profile_id, mode)) = resolved else {
+        return;
+    };
+    let engine = Arc::clone(&*app.state::<Arc<Engine>>());
+    match (mode, state) {
+        (DictationMode::Hold, ShortcutState::Pressed) => start_profile(app, &engine, &profile_id),
+        (DictationMode::Hold, ShortcutState::Released) => engine.dictation.stop(),
+        (DictationMode::Toggle, ShortcutState::Pressed) => {
+            if engine.dictation.is_active() {
+                engine.dictation.stop();
+            } else {
+                start_profile(app, &engine, &profile_id);
+            }
+        }
+        (DictationMode::Toggle, ShortcutState::Released) => {}
+    }
 }
 
 pub(crate) fn start_profile(app: &AppHandle, engine: &Engine, profile_id: &str) {
