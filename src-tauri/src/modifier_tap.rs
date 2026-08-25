@@ -19,7 +19,7 @@ use core_graphics::event::{
 };
 use serde_json::json;
 use speakly_engine::Engine;
-use speakly_engine_types::Profile;
+use speakly_engine_types::{DictationMode, Profile};
 use tauri::{AppHandle, Emitter, Manager};
 
 const CHORD_WINDOW: Duration = Duration::from_millis(150);
@@ -60,8 +60,20 @@ impl Default for TapState {
 struct ActivePress {
     keycode: u16,
     profile_id: String,
+    mode: DictationMode,
     pressed_at: Instant,
     chord_cancelled: bool,
+}
+
+/// The profile's CURRENT mode, read at press time (a profile edit mid-press is
+/// irrelevant; across presses this always reflects the latest settings).
+fn resolve_mode(app: &AppHandle, profile_id: &str) -> DictationMode {
+    let state = app.state::<crate::settings::SettingsState>();
+    let settings = state.0.lock().unwrap();
+    settings
+        .profile(profile_id)
+        .map(|p| p.mode)
+        .unwrap_or(DictationMode::Hold)
 }
 
 /// Replace the running tap (if any) with one covering the given bare-modifier
@@ -126,20 +138,42 @@ fn tap_thread(app: AppHandle, engine: Arc<Engine>, map: Vec<(u16, String)>, stop
                     let mut slot = cb_active.lock().unwrap();
                     match (&*slot, down) {
                         (None, true) => {
+                            let mode = resolve_mode(&cb_app, profile_id);
                             *slot = Some(ActivePress {
                                 keycode,
                                 profile_id: profile_id.clone(),
+                                mode,
                                 pressed_at: Instant::now(),
                                 chord_cancelled: false,
                             });
-                            crate::shortcuts::start_profile(&cb_app, &cb_engine, profile_id);
+                            // Hold starts on press for zero latency; toggle
+                            // waits for a clean release (a chord key may still
+                            // follow, and toggling must not fire on ⌥C).
+                            if mode == DictationMode::Hold {
+                                crate::shortcuts::start_profile(&cb_app, &cb_engine, profile_id);
+                            }
                         }
                         (Some(press), false) if press.keycode == keycode => {
                             let cancelled = press.chord_cancelled;
-                            let _ = &press.profile_id;
+                            let mode = press.mode;
+                            let profile_id = press.profile_id.clone();
                             *slot = None;
-                            if !cancelled {
-                                cb_engine.dictation.stop();
+                            if cancelled {
+                                return CallbackResult::Keep;
+                            }
+                            match mode {
+                                DictationMode::Hold => cb_engine.dictation.stop(),
+                                DictationMode::Toggle => {
+                                    if cb_engine.dictation.is_active() {
+                                        cb_engine.dictation.stop();
+                                    } else {
+                                        crate::shortcuts::start_profile(
+                                            &cb_app,
+                                            &cb_engine,
+                                            &profile_id,
+                                        );
+                                    }
+                                }
                             }
                         }
                         _ => {}
@@ -148,11 +182,21 @@ fn tap_thread(app: AppHandle, engine: Arc<Engine>, map: Vec<(u16, String)>, stop
                 CGEventType::KeyDown => {
                     let mut slot = cb_active.lock().unwrap();
                     if let Some(press) = slot.as_mut() {
-                        if !press.chord_cancelled && press.pressed_at.elapsed() < CHORD_WINDOW {
-                            // Modifier + key within the window = a chord like
-                            // ⌥C, not push-to-talk. Abort quietly.
-                            press.chord_cancelled = true;
-                            cb_engine.dictation.cancel();
+                        if !press.chord_cancelled {
+                            match press.mode {
+                                // Hold started dictating on press; only an
+                                // immediate chord (⌥C) aborts it.
+                                DictationMode::Hold => {
+                                    if press.pressed_at.elapsed() < CHORD_WINDOW {
+                                        press.chord_cancelled = true;
+                                        cb_engine.dictation.cancel();
+                                    }
+                                }
+                                // Toggle hasn't started anything: any key while
+                                // the modifier is held makes this a chord, so
+                                // the release must not toggle.
+                                DictationMode::Toggle => press.chord_cancelled = true,
+                            }
                         }
                     }
                 }

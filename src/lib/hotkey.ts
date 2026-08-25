@@ -2,10 +2,10 @@
 
 /** Bare-modifier hold specs (handled by an event tap, not the plugin). */
 const BARE_PRETTY: Record<string, string> = {
-  RightOption: "⌥ right (hold)",
-  LeftOption: "⌥ left (hold)",
-  RightCommand: "⌘ right (hold)",
-  Fn: "fn (hold)",
+  RightOption: "⌥ right",
+  LeftOption: "⌥ left",
+  RightCommand: "⌘ right",
+  Fn: "fn",
 };
 
 export function isBareModifier(hotkey: string) {
