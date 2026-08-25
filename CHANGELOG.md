@@ -1,3 +1,10 @@
+## [2.0.1](https://github.com/Jonathan-Asher/speakly/compare/v2.0.0...v2.0.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* toggle-mode hotkeys and onboarding relapse after profile edits ([97751e8](https://github.com/Jonathan-Asher/speakly/commit/97751e8e0a547fe73b7cc16a8a656262db8053e5))
+
 ## [1.0.2](https://github.com/Jonathan-Asher/speakly/compare/v1.0.1...v1.0.2) (2026-08-25)
 
 
