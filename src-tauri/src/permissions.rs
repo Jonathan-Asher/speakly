@@ -62,3 +62,14 @@ pub fn open_privacy_pane(pane: String) -> Result<(), String> {
     };
     tauri_plugin_opener::open_url(url, None::<String>).map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn microphone_status_returns_meaningful_value() {
+        let s = super::microphone_status();
+        // A fresh test process should be undetermined (or denied on CI);
+        // "unknown" means the AVFoundation path itself is broken.
+        assert_ne!(s, "unknown", "AVFoundation status read failed");
+    }
+}

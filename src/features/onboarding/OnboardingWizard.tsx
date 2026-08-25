@@ -161,12 +161,19 @@ function MicrophoneStep({
   refresh: () => void;
 }) {
   const [probing, setProbing] = useState(false);
-  const status = perms?.microphone ?? "unknown";
+  const [probeError, setProbeError] = useState<string | null>(null);
+  const [probeOk, setProbeOk] = useState(false);
+  // A successful capture probe IS proof of access, whatever TCC reports.
+  const status = probeOk ? "granted" : (perms?.microphone ?? "unknown");
 
   const probe = async () => {
     setProbing(true);
+    setProbeError(null);
     try {
       await probeMicrophone();
+      setProbeOk(true);
+    } catch (e) {
+      setProbeError(String(e));
     } finally {
       setProbing(false);
       refresh();
@@ -200,6 +207,13 @@ function MicrophoneStep({
           </button>
         )}
       </div>
+      {probeError && (
+        <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-xs text-red-900 dark:border-red-700 dark:bg-red-950 dark:text-red-200">
+          Couldn't open the microphone: {probeError}. If no permission prompt
+          appeared, enable {strings.appName} under Privacy &amp; Security →
+          Microphone.
+        </div>
+      )}
       {status === "denied" && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
           Microphone access was denied. Enable {strings.appName} under Privacy
