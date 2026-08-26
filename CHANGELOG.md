@@ -1,3 +1,10 @@
+# [2.2.0](https://github.com/Jonathan-Asher/speakly/compare/v2.1.0...v2.2.0) (2026-08-26)
+
+
+### Features
+
+* instant toggle start on key-down, Esc cancels recording ([62e05c1](https://github.com/Jonathan-Asher/speakly/commit/62e05c12299af1e49b84e86fcb87fb0b588b52e9))
+
 # [2.1.0](https://github.com/Jonathan-Asher/speakly/compare/v2.0.1...v2.1.0) (2026-08-25)
 
 
