@@ -23,8 +23,10 @@ pub enum PasteOutcome {
     Failed(String),
 }
 
-/// Must run on the main thread (arboard/NSPasteboard); the caller uses
-/// `run_on_main_thread`.
+/// Writes the clipboard (NSPasteboard — main thread, via the caller's
+/// `run_on_main_thread`) and hands the keystroke + restore to a background
+/// thread. The main thread must never sleep here: it is the UI/event thread,
+/// and stalling it delays every key the user presses next.
 pub fn paste_text(_app: &AppHandle, text: &str, restore_clipboard: bool) -> PasteOutcome {
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(c) => c,
@@ -44,21 +46,21 @@ pub fn paste_text(_app: &AppHandle, text: &str, restore_clipboard: bool) -> Past
         return PasteOutcome::ClipboardOnly;
     }
 
-    // Let the pasteboard settle before the target app reads it.
-    std::thread::sleep(Duration::from_millis(120));
-    if let Err(e) = send_cmd_v() {
-        return PasteOutcome::Failed(e);
-    }
-
-    if let Some(prev) = previous {
-        // Restore off-thread after the target app has consumed the paste.
-        std::thread::spawn(move || {
+    std::thread::spawn(move || {
+        // Let the pasteboard settle before the target app reads it.
+        std::thread::sleep(Duration::from_millis(120));
+        match send_cmd_v() {
+            Ok(()) => tracing::info!("paste delivered"),
+            Err(e) => tracing::warn!("paste keystroke failed: {e}"),
+        }
+        if let Some(prev) = previous {
+            // Restore after the target app has consumed the paste.
             std::thread::sleep(Duration::from_millis(700));
             if let Ok(mut cb) = arboard::Clipboard::new() {
                 let _ = cb.set_text(prev);
             }
-        });
-    }
+        }
+    });
     PasteOutcome::Pasted
 }
 

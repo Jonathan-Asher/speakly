@@ -14,18 +14,39 @@ pub struct AppSink {
     pub app: AppHandle,
 }
 
+/// Queue UI work on the main thread WITHOUT blocking the caller.
+///
+/// Engine events are emitted synchronously on whatever thread produced them —
+/// including the main thread, when a hotkey handler calls into the engine.
+/// Touching tray/window/sound APIs inline from there is re-entrant UI work on
+/// a busy main thread, which wedges the app. Everything UI-shaped goes through
+/// here instead: `run_on_main_thread` queues onto the event loop, so the work
+/// runs after the current handler returns, never inside it.
+pub fn on_ui<F>(app: &AppHandle, f: F)
+where
+    F: FnOnce(AppHandle) + Send + 'static,
+{
+    let target = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || f(target)) {
+        tracing::warn!("ui dispatch failed: {e}");
+    }
+}
+
 impl AppSink {
     fn emit_state(&self, phase: &str, profile_id: &str) {
-        tray::set_state(&self.app, phase);
         crate::input::set_escape_armed(&self.app, phase == "listening");
-        match phase {
-            "listening" => {
-                hud::show(&self.app);
-                crate::sound::play(&self.app, crate::sound::Cue::Start);
+        let phase_owned = phase.to_string();
+        on_ui(&self.app, move |app| {
+            tray::set_state(&app, &phase_owned);
+            match phase_owned.as_str() {
+                "listening" => {
+                    hud::show(&app);
+                    crate::sound::play(&app, crate::sound::Cue::Start);
+                }
+                "idle" => hud::hide(&app),
+                _ => {}
             }
-            "idle" => hud::hide(&self.app),
-            _ => {}
-        }
+        });
         let _ = self.app.emit(
             "dictation://state",
             json!({ "phase": phase, "profileId": profile_id }),
@@ -359,8 +380,10 @@ fn schedule_idle(app: &AppHandle, profile_id: String, delay_ms: u64) {
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-        tray::set_state(&app, "idle");
-        hud::hide(&app);
+        on_ui(&app, |app| {
+            tray::set_state(&app, "idle");
+            hud::hide(&app);
+        });
         let _ = app.emit(
             "dictation://state",
             json!({ "phase": "idle", "profileId": profile_id }),
