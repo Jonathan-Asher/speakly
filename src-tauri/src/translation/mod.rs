@@ -70,7 +70,7 @@ fn translate_once(cfg: &TranslateConfig, api_key: &str, text: &str) -> Result<St
         TranslationProvider::Groq => openai_compatible(
             "https://api.groq.com/openai/v1/chat/completions",
             api_key,
-            model.unwrap_or("llama-3.3-70b-versatile"),
+            model.unwrap_or("openai/gpt-oss-120b"),
             &system,
             text,
         ),
@@ -87,7 +87,17 @@ fn translate_once(cfg: &TranslateConfig, api_key: &str, text: &str) -> Result<St
             let model = model.ok_or("custom provider model not configured")?;
             openai_compatible(&url, api_key, model, &system, text)
         }
-        TranslationProvider::Google => google(api_key, &cfg.target_language, text),
+        TranslationProvider::Google => google(api_key, &cfg.target_language, text).map_err(|e| {
+            if e.contains("403") {
+                format!(
+                    "{e} — enable the \"Cloud Translation API\" for your key's Google \
+                         Cloud project (console.cloud.google.com → APIs & Services), and check \
+                         the key's API restrictions"
+                )
+            } else {
+                e
+            }
+        }),
     }
 }
 
