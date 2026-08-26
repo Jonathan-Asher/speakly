@@ -1,3 +1,10 @@
+# [2.4.0](https://github.com/Jonathan-Asher/speakly/compare/v2.3.2...v2.4.0) (2026-08-26)
+
+
+### Features
+
+* actionable user-facing error messages ([13e7ad0](https://github.com/Jonathan-Asher/speakly/commit/13e7ad0fffd8b5df7e14c7fb2507a55aaef71228))
+
 ## [2.3.2](https://github.com/Jonathan-Asher/speakly/compare/v2.3.1...v2.3.2) (2026-08-26)
 
 
