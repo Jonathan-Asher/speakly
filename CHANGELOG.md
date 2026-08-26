@@ -1,3 +1,10 @@
+# [2.5.0](https://github.com/Jonathan-Asher/speakly/compare/v2.4.1...v2.5.0) (2026-08-26)
+
+
+### Features
+
+* Refine — clean up dictated speech before pasting ([9304c12](https://github.com/Jonathan-Asher/speakly/commit/9304c12611509a42309a7507306d988dcc5325c0))
+
 ## [2.4.1](https://github.com/Jonathan-Asher/speakly/compare/v2.4.0...v2.4.1) (2026-08-26)
 
 
