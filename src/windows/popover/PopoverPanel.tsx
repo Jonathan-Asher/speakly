@@ -9,7 +9,15 @@ interface Profile {
   id: string;
   name: string;
   hotkey: string;
-  translate?: { enabled: boolean; target_language: string } | null;
+  translate?: {
+    enabled: boolean;
+    refine?: boolean;
+    provider?: string;
+    target_language: string;
+    system_prompt?: string | null;
+    model?: string | null;
+    endpoint?: string | null;
+  } | null;
 }
 
 interface HistoryItem {
@@ -38,6 +46,24 @@ export function PopoverPanel() {
   const last = useDictationStore((s) => s.last);
 
   const refetchProfiles = () => void invoke<Profile[]>("get_profiles").then(setProfiles);
+
+  // Flip Refine without opening the main window; settings://changed refetches.
+  const toggleRefine = (p: Profile) => {
+    const c = p.translate;
+    const next = {
+      enabled: c?.enabled ?? false,
+      refine: !(c?.refine ?? false),
+      provider: c?.provider ?? "groq",
+      target_language: c?.target_language ?? "English",
+      ...(c?.system_prompt ? { system_prompt: c.system_prompt } : {}),
+      ...(c?.model ? { model: c.model } : {}),
+      ...(c?.endpoint ? { endpoint: c.endpoint } : {}),
+    };
+    void invoke("upsert_profile", { profile: { ...p, translate: next } }).then(
+      refetchProfiles,
+      () => refetchProfiles(),
+    );
+  };
   const refetchRecent = () =>
     void invoke<{ items: HistoryItem[] }>("history_search", { query: null, page: 0 })
       .then((r) => setRecent(r.items.slice(0, 3)))
@@ -103,9 +129,22 @@ export function PopoverPanel() {
                   </span>
                 )}
               </span>
-              <kbd className="ms-2 shrink-0 rounded border border-neutral-300 bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-600 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
-                {prettyHotkey(p.hotkey)}
-              </kbd>
+              <span className="ms-2 flex shrink-0 items-center gap-1.5">
+                <button
+                  onClick={() => toggleRefine(p)}
+                  title="Refine: clean up filler sounds before pasting"
+                  className={`rounded-full px-1.5 py-0.5 text-[11px] transition-colors ${
+                    p.translate?.refine
+                      ? "bg-violet-500/15 text-violet-700 dark:text-violet-300"
+                      : "text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  }`}
+                >
+                  ✨
+                </button>
+                <kbd className="rounded border border-neutral-300 bg-neutral-100 px-1.5 py-0.5 text-[11px] text-neutral-600 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
+                  {prettyHotkey(p.hotkey)}
+                </kbd>
+              </span>
             </div>
           ))}
         </div>

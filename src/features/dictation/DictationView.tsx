@@ -26,6 +26,7 @@ export function DictationView() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [models, setModels] = useState<ModelStatus[]>([]);
   const [axTrusted, setAxTrusted] = useState<boolean | null>(null);
+  const [refineError, setRefineError] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ draft: ProfileDraft; isNew: boolean } | null>(null);
   const phase = useDictationStore((s) => s.phase);
   const activeProfile = useDictationStore((s) => s.profileId);
@@ -54,6 +55,29 @@ export function DictationView() {
   }, [refetchProfiles]);
 
   const missingModels = models.filter((m) => !m.present);
+
+  // One-click Refine: flips the flag through the same upsert the editor uses,
+  // creating a default (refine-only) AI config when the profile has none.
+  const toggleRefine = async (p: Profile) => {
+    const current = p.translate;
+    const next = {
+      enabled: current?.enabled ?? false,
+      refine: !(current?.refine ?? false),
+      provider: current?.provider ?? "groq",
+      target_language: current?.target_language ?? "English",
+      ...(current?.system_prompt ? { system_prompt: current.system_prompt } : {}),
+      ...(current?.model ? { model: current.model } : {}),
+      ...(current?.endpoint ? { endpoint: current.endpoint } : {}),
+    };
+    try {
+      await invoke("upsert_profile", { profile: { ...p, translate: next } });
+      setProfiles((list) =>
+        list.map((x) => (x.id === p.id ? { ...x, translate: next } : x)),
+      );
+    } catch (e) {
+      setRefineError(String(e));
+    }
+  };
 
   return (
     <div className="flex w-full max-w-2xl flex-col gap-4">
@@ -113,7 +137,17 @@ export function DictationView() {
                     {phase}…
                   </span>
                 ) : (
-                  <span />
+                  <button
+                    onClick={() => void toggleRefine(p)}
+                    title="Clean up filler sounds and false starts before pasting"
+                    className={`rounded-full px-2 py-0.5 text-xs transition-colors ${
+                      p.translate?.refine
+                        ? "bg-violet-500/15 font-medium text-violet-700 dark:text-violet-300"
+                        : "text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    }`}
+                  >
+                    ✨ Refine{p.translate?.refine ? " on" : ""}
+                  </button>
                 )}
                 <button
                   onClick={() => setEditor({ draft: { ...p }, isNew: false })}
@@ -144,6 +178,11 @@ export function DictationView() {
 
       <TranslationSettings />
 
+      {refineError && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+          {refineError}
+        </div>
+      )}
       {warning && phase === "idle" && (
         <div className="text-sm text-neutral-500">{warning}</div>
       )}

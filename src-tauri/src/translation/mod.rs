@@ -9,6 +9,39 @@ use speakly_engine_types::{TranslateConfig, TranslationProvider};
 
 const DEFAULT_SYSTEM: &str =
     "Translate the user's text to {targetLanguage}. Output only the translation, nothing else.";
+
+/// The cleanup instruction, calibrated against real dictations: strip the
+/// conversational scaffolding, keep the substance verbatim. The examples are
+/// load-bearing — without them models under-clean lead-ins like "listen, so
+/// basically".
+const REFINE_INSTRUCTION: &str = "Turn dictated speech into the message the speaker meant to \
+    write. Remove filler sounds (uh, um, אה, אמם), conversational lead-ins and discourse markers \
+    (listen, so, basically, you know, I mean, תשמע, אז, כאילו, בעצם), false starts, \
+    self-corrections, repetitions, and asides that aren't part of the message. Fix punctuation \
+    and capitalization. Keep the speaker's own words, language, tone, and meaning — never add \
+    content, answer questions, or rephrase what is already clear.\n\
+    Example — input: `Listen, so basically, uh... basically the client's company.` → output: \
+    `The client's company.`\n\
+    Example — input: `אה… תשמע, בעצם, אני צריך לשלוח, אני צריך לשלוח את המסמך ללקוח.` → output: \
+    `אני צריך לשלוח את המסמך ללקוח.`";
+
+/// System prompt for the profile's AI stage: refine, translate, or both.
+fn stage_prompt(cfg: &TranslateConfig) -> String {
+    match (cfg.refine, cfg.enabled) {
+        (true, true) => format!(
+            "{REFINE_INSTRUCTION}\nThen translate the result to {}. Output only the clean \
+             translation.",
+            cfg.target_language
+        ),
+        (true, false) => format!("{REFINE_INSTRUCTION}\nOutput only the cleaned text."),
+        // Translate-only keeps the user's custom prompt override.
+        (false, _) => cfg
+            .system_prompt
+            .clone()
+            .unwrap_or_else(|| DEFAULT_SYSTEM.to_string())
+            .replace("{targetLanguage}", &cfg.target_language),
+    }
+}
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn provider_slug(p: TranslationProvider) -> &'static str {
@@ -49,11 +82,7 @@ pub fn translate(cfg: &TranslateConfig, api_key: &str, text: &str) -> Result<Str
 }
 
 fn translate_once(cfg: &TranslateConfig, api_key: &str, text: &str) -> Result<String, String> {
-    let system = cfg
-        .system_prompt
-        .clone()
-        .unwrap_or_else(|| DEFAULT_SYSTEM.to_string())
-        .replace("{targetLanguage}", &cfg.target_language);
+    let system = stage_prompt(cfg);
     let model = cfg.model.as_deref();
 
     match cfg.provider {
@@ -87,6 +116,11 @@ fn translate_once(cfg: &TranslateConfig, api_key: &str, text: &str) -> Result<St
             let model = model.ok_or("custom provider model not configured")?;
             openai_compatible(&url, api_key, model, &system, text)
         }
+        TranslationProvider::Google if cfg.refine => Err(
+            "Refine needs an LLM provider — Google can only translate. Pick Groq, OpenAI, \
+             Anthropic, or a custom provider."
+                .to_string(),
+        ),
         TranslationProvider::Google => google(api_key, &cfg.target_language, text).map_err(|e| {
             if e.contains("403") {
                 format!(
@@ -282,5 +316,51 @@ mod tests {
     fn google_codes_map_names() {
         assert_eq!(google_lang_code("English"), "en");
         assert_eq!(google_lang_code("he"), "he");
+    }
+}
+
+#[cfg(test)]
+mod stage_tests {
+    use super::*;
+
+    fn cfg(refine: bool, enabled: bool) -> TranslateConfig {
+        TranslateConfig {
+            enabled,
+            refine,
+            provider: TranslationProvider::Groq,
+            target_language: "English".into(),
+            system_prompt: None,
+            model: None,
+            endpoint: None,
+        }
+    }
+
+    #[test]
+    fn refine_only_asks_for_cleanup_not_translation() {
+        let p = stage_prompt(&cfg(true, false));
+        assert!(p.contains("Remove filler sounds"));
+        assert!(p.contains("Output only the cleaned text"));
+        assert!(!p.contains("translate the result"));
+    }
+
+    #[test]
+    fn combined_cleans_then_translates() {
+        let p = stage_prompt(&cfg(true, true));
+        assert!(p.contains("Remove filler sounds"));
+        assert!(p.contains("translate the result to English"));
+    }
+
+    #[test]
+    fn translate_only_keeps_the_classic_prompt() {
+        let p = stage_prompt(&cfg(false, true));
+        assert!(p.contains("Translate the user's text to English"));
+        assert!(!p.contains("filler"));
+    }
+
+    #[test]
+    fn custom_prompt_overrides_translate_only() {
+        let mut c = cfg(false, true);
+        c.system_prompt = Some("Say it in {targetLanguage}, pirate style.".into());
+        assert_eq!(stage_prompt(&c), "Say it in English, pirate style.");
     }
 }

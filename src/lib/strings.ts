@@ -18,6 +18,7 @@ export const strings = {
     listening: "Listening",
     transcribing: "Transcribing…",
     translating: "Translating…",
+    refining: "Refining…",
     pasted: "Pasted",
   },
 } as const;

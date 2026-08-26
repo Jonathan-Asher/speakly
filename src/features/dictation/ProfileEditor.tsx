@@ -4,6 +4,7 @@ import { HotkeyRecorder } from "./HotkeyRecorder";
 
 export interface TranslateDraft {
   enabled: boolean;
+  refine: boolean;
   provider: string;
   target_language: string;
   system_prompt?: string | null;
@@ -95,6 +96,7 @@ export function ProfileEditor({
       ...d,
       translate: {
         enabled: false,
+        refine: false,
         provider: "groq",
         target_language: "English",
         ...(d.translate ?? {}),
@@ -131,6 +133,11 @@ export function ProfileEditor({
   };
 
   const translateOn = draft.translate?.enabled ?? false;
+  const refineOn = draft.translate?.refine ?? false;
+  const aiOn = translateOn || refineOn;
+  const provider = draft.translate?.provider ?? "groq";
+  // Google's API only translates; cleanup needs a language model.
+  const refineBlocked = refineOn && provider === "google";
 
   return (
     <div
@@ -208,6 +215,18 @@ export function ProfileEditor({
           </Row>
 
           <div className="mt-1 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+            <Row label="Refine">
+              <div className="flex flex-col items-end gap-1">
+                <input
+                  type="checkbox"
+                  checked={refineOn}
+                  onChange={(e) => setTranslate({ refine: e.target.checked })}
+                />
+                <span className="max-w-56 text-end text-xs text-neutral-400">
+                  Removes filler sounds, false starts, and asides before pasting
+                </span>
+              </div>
+            </Row>
             <Row label="Translate">
               <input
                 type="checkbox"
@@ -215,7 +234,13 @@ export function ProfileEditor({
                 onChange={(e) => setTranslate({ enabled: e.target.checked })}
               />
             </Row>
-            {translateOn && (
+            {refineBlocked && (
+              <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+                Refine needs an LLM provider — Google can only translate. Pick Groq,
+                OpenAI, Anthropic, or a custom provider.
+              </div>
+            )}
+            {aiOn && (
               <div className="mt-3 flex flex-col gap-3">
                 <Row label="Provider">
                   <select
@@ -230,14 +255,16 @@ export function ProfileEditor({
                     ))}
                   </select>
                 </Row>
-                <Row label="Target language">
-                  <input
-                    className={inputCls}
-                    value={draft.translate?.target_language ?? ""}
-                    placeholder="English"
-                    onChange={(e) => setTranslate({ target_language: e.target.value })}
-                  />
-                </Row>
+                {translateOn && (
+                  <Row label="Target language">
+                    <input
+                      className={inputCls}
+                      value={draft.translate?.target_language ?? ""}
+                      placeholder="English"
+                      onChange={(e) => setTranslate({ target_language: e.target.value })}
+                    />
+                  </Row>
+                )}
                 <Row label="Model override">
                   <input
                     className={inputCls}

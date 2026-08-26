@@ -279,6 +279,7 @@ fn he_en_profile() -> Profile {
         model_id: "he-turbo".into(),
         translate: Some(TranslateConfig {
             enabled: true,
+            refine: true,
             provider: TranslationProvider::Groq,
             target_language: "English".into(),
             system_prompt: None,

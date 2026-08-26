@@ -53,6 +53,12 @@ export function HudPill() {
             <span className="text-sm font-medium">{strings.hud.transcribing}</span>
           </>
         )}
+        {phase === "refining" && (
+          <>
+            <span className="size-3 animate-spin rounded-full border-2 border-violet-400 border-t-white" />
+            <span className="text-sm font-medium">{strings.hud.refining}</span>
+          </>
+        )}
         {phase === "translating" && (
           <>
             <span className="size-3 animate-spin rounded-full border-2 border-indigo-400 border-t-white" />

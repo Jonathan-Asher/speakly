@@ -16,7 +16,12 @@ pub enum DictationMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranslateConfig {
+    /// Translate the transcript to `target_language`.
     pub enabled: bool,
+    /// Clean the transcript up before pasting: drop filler sounds, false
+    /// starts, and conversational scaffolding. Independent of `enabled`.
+    #[serde(default)]
+    pub refine: bool,
     pub provider: TranslationProvider,
     pub target_language: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

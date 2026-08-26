@@ -8,6 +8,7 @@ export type DictationPhase =
   | "listening"
   | "transcribing"
   | "translating"
+  | "refining"
   | "pasting"
   | "pasted"
   | "copied"
@@ -28,6 +29,7 @@ export interface DictationFinalEvent {
   latencyMs: number;
   translateMs: number | null;
   translated: boolean;
+  refined: boolean;
 }
 
 export interface EngineWarningEvent {

@@ -308,6 +308,7 @@ pub fn test_translation(provider: String, target_language: String) -> Result<Str
     }
     let cfg = speakly_engine_types::TranslateConfig {
         enabled: true,
+        refine: false,
         provider: parsed,
         target_language,
         system_prompt: None,
@@ -643,7 +644,7 @@ pub fn upsert_profile(
                 .map_err(|_| format!("'{}' is not a usable hotkey", profile.hotkey))?,
         )
     };
-    if let Some(t) = profile.translate.as_ref().filter(|t| t.enabled) {
+    if let Some(t) = profile.translate.as_ref().filter(|t| t.enabled || t.refine) {
         if matches!(
             t.provider,
             speakly_engine_types::TranslationProvider::Custom
@@ -651,8 +652,21 @@ pub fn upsert_profile(
         {
             return Err("The custom provider needs an endpoint URL".into());
         }
-        if t.target_language.trim().is_empty() {
+        if t.enabled && t.target_language.trim().is_empty() {
             return Err("Pick a target language for translation".into());
+        }
+        // Google's API only translates; cleanup needs a language model.
+        if t.refine
+            && matches!(
+                t.provider,
+                speakly_engine_types::TranslationProvider::Google
+            )
+        {
+            return Err(
+                "Refine needs an LLM provider — Google can only translate. Pick Groq, OpenAI, \
+                 Anthropic, or a custom provider."
+                    .into(),
+            );
         }
     }
 

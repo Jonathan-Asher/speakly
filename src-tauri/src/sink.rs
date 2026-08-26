@@ -266,14 +266,21 @@ impl EventSink for AppSink {
                         .unwrap_or((true, true, None))
                 };
 
-                // Translation stage (He→En etc.) — runs on this engine thread,
-                // never the main thread. Failure pastes the untranslated source.
+                // AI stage: refine (clean up dictation), translate, or both —
+                // one provider call either way. Runs on this engine thread,
+                // never the main thread. Any failure pastes the raw transcript.
                 let mut final_text = text.clone();
                 let mut translated = false;
+                let mut refined = false;
                 let mut translated_provider: Option<String> = None;
                 let mut translate_ms: Option<u64> = None;
-                if let Some(cfg) = translate_cfg.filter(|c| c.enabled) {
-                    self.emit_state("translating", &profile_id);
+                if let Some(cfg) = translate_cfg.filter(|c| c.enabled || c.refine) {
+                    let phase = if cfg.enabled {
+                        "translating"
+                    } else {
+                        "refining"
+                    };
+                    self.emit_state(phase, &profile_id);
                     let slug = crate::translation::provider_slug(cfg.provider);
                     let key = crate::keychain::get_key(slug)
                         .ok()
@@ -288,7 +295,7 @@ impl EventSink for AppSink {
                             "engine://warning",
                             json!({
                                 "code": "translate",
-                                "message": format!("No API key saved for {slug} — pasted the original text"),
+                                "message": format!("No API key saved for {slug} — pasted the raw transcript"),
                             }),
                         );
                     } else {
@@ -297,7 +304,8 @@ impl EventSink for AppSink {
                             Ok(t) => {
                                 translate_ms = Some(t0.elapsed().as_millis() as u64);
                                 final_text = t;
-                                translated = true;
+                                translated = cfg.enabled;
+                                refined = cfg.refine;
                                 translated_provider = Some(slug.to_string());
                             }
                             Err(e) => {
@@ -307,7 +315,7 @@ impl EventSink for AppSink {
                                     "engine://warning",
                                     json!({
                                         "code": "translate",
-                                        "message": format!("Translation failed ({e}) — pasted the original text"),
+                                        "message": format!("{e} — pasted the raw transcript"),
                                     }),
                                 );
                             }
@@ -362,6 +370,7 @@ impl EventSink for AppSink {
                             "latencyMs": latency_ms,
                             "translateMs": translate_ms,
                             "translated": translated,
+                            "refined": refined,
                         }),
                     );
                     let _ = app.emit(
