@@ -1,3 +1,10 @@
+## [2.4.1](https://github.com/Jonathan-Asher/speakly/compare/v2.4.0...v2.4.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* never touch UI from the emitting thread (root cause of the freezes) ([773bae2](https://github.com/Jonathan-Asher/speakly/commit/773bae2fa93a68d74e578424c713584f9902d591))
+
 # [2.4.0](https://github.com/Jonathan-Asher/speakly/compare/v2.3.2...v2.4.0) (2026-08-26)
 
 
