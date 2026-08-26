@@ -77,6 +77,17 @@ pub fn reregister(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -> 
 /// settings lock is dropped before any engine call — engine events run
 /// synchronously on this thread.
 pub fn handle_event(app: &AppHandle, fired: &Shortcut, state: ShortcutState) {
+    // Esc is registered only while a dictation is listening (see sink.rs);
+    // it cancels — recording is discarded, nothing is pasted.
+    if let Ok(esc) = "Escape".parse::<Shortcut>() {
+        if *fired == esc {
+            if state == ShortcutState::Pressed {
+                let engine = Arc::clone(&*app.state::<Arc<Engine>>());
+                engine.dictation.cancel();
+            }
+            return;
+        }
+    }
     let resolved = {
         let settings_state = app.state::<SettingsState>();
         let settings = settings_state.0.lock().unwrap();

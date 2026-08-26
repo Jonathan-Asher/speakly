@@ -59,10 +59,12 @@ impl Default for TapState {
 
 struct ActivePress {
     keycode: u16,
-    profile_id: String,
     mode: DictationMode,
     pressed_at: Instant,
     chord_cancelled: bool,
+    /// Toggle press made while recording: the stop fires on a clean release
+    /// (a chord like ⌥C mid-recording must not stop-and-paste).
+    toggle_stop: bool,
 }
 
 /// The profile's CURRENT mode, read at press time (a profile edit mid-press is
@@ -139,24 +141,27 @@ fn tap_thread(app: AppHandle, engine: Arc<Engine>, map: Vec<(u16, String)>, stop
                     match (&*slot, down) {
                         (None, true) => {
                             let mode = resolve_mode(&cb_app, profile_id);
+                            let toggle_stop =
+                                mode == DictationMode::Toggle && cb_engine.dictation.is_active();
                             *slot = Some(ActivePress {
                                 keycode,
-                                profile_id: profile_id.clone(),
                                 mode,
                                 pressed_at: Instant::now(),
                                 chord_cancelled: false,
+                                toggle_stop,
                             });
-                            // Hold starts on press for zero latency; toggle
-                            // waits for a clean release (a chord key may still
-                            // follow, and toggling must not fire on ⌥C).
-                            if mode == DictationMode::Hold {
+                            // Both modes START on press for zero latency (a
+                            // chord within the window cancels). A toggle press
+                            // made while recording stops on clean release so a
+                            // mid-recording chord can't stop-and-paste.
+                            if !toggle_stop {
                                 crate::shortcuts::start_profile(&cb_app, &cb_engine, profile_id);
                             }
                         }
                         (Some(press), false) if press.keycode == keycode => {
                             let cancelled = press.chord_cancelled;
                             let mode = press.mode;
-                            let profile_id = press.profile_id.clone();
+                            let toggle_stop = press.toggle_stop;
                             *slot = None;
                             if cancelled {
                                 return CallbackResult::Keep;
@@ -164,15 +169,10 @@ fn tap_thread(app: AppHandle, engine: Arc<Engine>, map: Vec<(u16, String)>, stop
                             match mode {
                                 DictationMode::Hold => cb_engine.dictation.stop(),
                                 DictationMode::Toggle => {
-                                    if cb_engine.dictation.is_active() {
+                                    if toggle_stop {
                                         cb_engine.dictation.stop();
-                                    } else {
-                                        crate::shortcuts::start_profile(
-                                            &cb_app,
-                                            &cb_engine,
-                                            &profile_id,
-                                        );
                                     }
+                                    // Start already happened on press.
                                 }
                             }
                         }
@@ -183,19 +183,15 @@ fn tap_thread(app: AppHandle, engine: Arc<Engine>, map: Vec<(u16, String)>, stop
                     let mut slot = cb_active.lock().unwrap();
                     if let Some(press) = slot.as_mut() {
                         if !press.chord_cancelled {
-                            match press.mode {
-                                // Hold started dictating on press; only an
-                                // immediate chord (⌥C) aborts it.
-                                DictationMode::Hold => {
-                                    if press.pressed_at.elapsed() < CHORD_WINDOW {
-                                        press.chord_cancelled = true;
-                                        cb_engine.dictation.cancel();
-                                    }
-                                }
-                                // Toggle hasn't started anything: any key while
-                                // the modifier is held makes this a chord, so
-                                // the release must not toggle.
-                                DictationMode::Toggle => press.chord_cancelled = true,
+                            if press.toggle_stop {
+                                // Pending stop: a chord means "don't stop";
+                                // recording continues untouched.
+                                press.chord_cancelled = true;
+                            } else if press.pressed_at.elapsed() < CHORD_WINDOW {
+                                // Started on press (either mode); an immediate
+                                // chord like ⌥C aborts the young dictation.
+                                press.chord_cancelled = true;
+                                cb_engine.dictation.cancel();
                             }
                         }
                     }

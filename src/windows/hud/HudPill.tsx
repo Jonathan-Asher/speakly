@@ -40,7 +40,10 @@ export function HudPill() {
                 </span>
               </div>
             ) : (
-              <span className="text-sm font-medium">{strings.hud.listening}</span>
+              <span className="text-sm font-medium">
+                {strings.hud.listening}
+                <span className="ms-2 text-xs font-normal text-neutral-500">esc cancels</span>
+              </span>
             )}
           </>
         )}
