@@ -1,3 +1,10 @@
+## [2.3.2](https://github.com/Jonathan-Asher/speakly/compare/v2.3.1...v2.3.2) (2026-08-26)
+
+
+### Bug Fixes
+
+* **translate:** current Groq default model, actionable Google 403 ([2c563f2](https://github.com/Jonathan-Asher/speakly/commit/2c563f25c98aa406442700a3b43dc355a7953cb8))
+
 ## [2.3.1](https://github.com/Jonathan-Asher/speakly/compare/v2.3.0...v2.3.1) (2026-08-26)
 
 
