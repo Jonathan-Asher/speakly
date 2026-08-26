@@ -766,3 +766,10 @@ pub fn quit_app(app: AppHandle) {
 pub fn meeting_stop(engine: State<'_, Arc<Engine>>, session_id: u64) -> Result<(), String> {
     engine.meetings.stop(session_id)
 }
+
+/// The hotkey recorder toggles this while capturing so dictation hotkeys
+/// don't fire (and don't swallow the keystrokes being recorded).
+#[tauri::command]
+pub fn set_hotkey_capture(app: AppHandle, active: bool) {
+    crate::input::set_capture_mode(&app, active);
+}

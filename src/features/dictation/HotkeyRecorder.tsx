@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { bareModifierFromEvent, eventToAccelerator, prettyHotkey } from "../../lib/hotkey";
 
 /**
@@ -19,6 +20,10 @@ export function HotkeyRecorder({
 
   useEffect(() => {
     if (!recording) return;
+    // Suspend global dictation hotkeys while capturing: the keys being
+    // recorded must reach this window, not start a recording (and registered
+    // combos would otherwise swallow the keystroke before we see it).
+    void invoke("set_hotkey_capture", { active: true });
     const onKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -53,6 +58,8 @@ export function HotkeyRecorder({
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp, true);
+      // Covers capture-done, Esc, and unmount alike.
+      void invoke("set_hotkey_capture", { active: false });
     };
   }, [recording, onChange]);
 

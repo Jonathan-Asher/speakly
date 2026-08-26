@@ -16,6 +16,10 @@
 //! detached thread (re-entering the plugin deadlocks it).
 
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// While the profile editor's hotkey recorder is capturing, dictation keys
+/// must reach the webview instead of starting recordings.
+static CAPTURE_MODE: AtomicBool = AtomicBool::new(false);
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -73,6 +77,9 @@ fn mode_of(app: &AppHandle, profile_id: &str) -> DictationMode {
 
 /// A profile's combination went DOWN (combo Pressed, or bare modifier down).
 pub fn pressed(app: &AppHandle, profile_id: &str) {
+    if CAPTURE_MODE.load(Ordering::Relaxed) {
+        return;
+    }
     cancel_deferred_stop(app);
     let engine = engine(app);
     match engine.dictation.active_profile_id() {
@@ -98,6 +105,9 @@ pub fn pressed(app: &AppHandle, profile_id: &str) {
 /// modifiers: a chord like ⌥C mid-recording must not stop-and-paste). Returns
 /// true when the caller should treat this press as a pending stop.
 pub fn pressed_defer_toggle_stop(app: &AppHandle, profile_id: &str) -> bool {
+    if CAPTURE_MODE.load(Ordering::Relaxed) {
+        return false;
+    }
     cancel_deferred_stop(app);
     let engine = engine(app);
     match engine.dictation.active_profile_id() {
@@ -115,6 +125,9 @@ pub fn pressed_defer_toggle_stop(app: &AppHandle, profile_id: &str) -> bool {
 
 /// A profile's combination went UP.
 pub fn released(app: &AppHandle, profile_id: &str) {
+    if CAPTURE_MODE.load(Ordering::Relaxed) {
+        return;
+    }
     let engine = engine(app);
     let Some(current) = engine.dictation.active_profile_id() else {
         return;
@@ -157,6 +170,35 @@ pub fn set_escape_armed(app: &AppHandle, armed: bool) {
             };
             if let Err(e) = result {
                 tracing::debug!("escape hotkey ({armed}): {e}");
+            }
+        });
+    });
+}
+
+/// Enter/leave hotkey-capture mode (the profile editor's recorder). Plugin
+/// shortcuts are unregistered so keystrokes reach the webview; the event tap
+/// stays up (listen-only) but the guards above ignore it. Deferred to the
+/// main thread, same discipline as Esc arming.
+pub fn set_capture_mode(app: &AppHandle, active: bool) {
+    CAPTURE_MODE.store(active, Ordering::Relaxed);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            if active {
+                if let Err(e) = handle.global_shortcut().unregister_all() {
+                    tracing::warn!("capture-mode unregister: {e}");
+                }
+            } else {
+                let engine = Arc::clone(&*handle.state::<Arc<Engine>>());
+                let settings = handle
+                    .state::<crate::settings::SettingsState>()
+                    .0
+                    .lock()
+                    .unwrap()
+                    .clone();
+                crate::shortcuts::reregister(&handle, engine, &settings);
             }
         });
     });
