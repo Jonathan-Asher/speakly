@@ -1,3 +1,10 @@
+# [2.3.0](https://github.com/Jonathan-Asher/speakly/compare/v2.2.0...v2.3.0) (2026-08-26)
+
+
+### Features
+
+* unified input dispatcher — combination evolution, safe Esc, no plugin re-entrancy ([0835606](https://github.com/Jonathan-Asher/speakly/commit/08356061d8368cf2baea6e18047fa6ed63f64468))
+
 # [2.2.0](https://github.com/Jonathan-Asher/speakly/compare/v2.1.0...v2.2.0) (2026-08-26)
 
 
