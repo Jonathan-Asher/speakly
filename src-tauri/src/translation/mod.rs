@@ -117,7 +117,13 @@ fn post_json(
         .header("content-type", "application/json")
         .json(body)
         .send()
-        .map_err(|e| format!("{provider}: {e}"))?;
+        .map_err(|e| {
+            if e.is_timeout() || e.is_connect() {
+                format!("{provider} didn't respond — check your internet connection")
+            } else {
+                format!("{provider}: {e}")
+            }
+        })?;
     let status = resp.status();
     let body: Value = resp
         .json()
@@ -127,9 +133,40 @@ fn post_json(
             .as_str()
             .map(str::to_string)
             .unwrap_or_else(|| truncate(&body.to_string(), 200));
-        return Err(format!("{provider}: HTTP {status}: {detail}"));
+        tracing::warn!("{provider} HTTP {status}: {detail}");
+        return Err(humanize_http(provider, status.as_u16(), &detail));
     }
     Ok(body)
+}
+
+/// Turn provider HTTP failures into messages a user can act on. The raw
+/// detail goes to the log above; only actionable text reaches the UI.
+fn humanize_http(provider: &str, status: u16, detail: &str) -> String {
+    match status {
+        401 | 403 => {
+            let mut msg = format!(
+                "{provider}: the API key was rejected — check it under Dictation → Translation"
+            );
+            if provider == "google" && detail.contains("blocked") {
+                msg = "google: the Cloud Translation API isn't enabled for this key's project — \
+                     enable it at console.cloud.google.com (APIs & Services), and check the \
+                     key's API restrictions"
+                    .to_string();
+            }
+            msg
+        }
+        404 => format!(
+            "{provider}: that model isn't available — pick a different model in the profile's \
+             translation settings ({})",
+            truncate(detail, 120)
+        ),
+        429 => format!("{provider}: rate limited — try again in a moment"),
+        500..=599 => format!("{provider} is having trouble right now — try again shortly"),
+        _ => format!(
+            "{provider}: request failed ({status}): {}",
+            truncate(detail, 120)
+        ),
+    }
 }
 
 /// Anthropic Messages API. No `temperature` — current Claude models reject

@@ -39,7 +39,7 @@ impl EventSink for AppSink {
             EngineEvent::DictationState { phase, profile_id } => {
                 self.emit_state(phase.as_str(), &profile_id);
                 if phase == Phase::Error {
-                    schedule_idle(&self.app, profile_id, 2_500);
+                    schedule_idle(&self.app, profile_id, 4_500);
                 }
             }
             EngineEvent::DictationPartial {

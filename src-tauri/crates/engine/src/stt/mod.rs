@@ -158,7 +158,11 @@ fn ensure_context(
         return Ok(0);
     }
     if !std::path::Path::new(model_path).is_file() {
-        return Err(format!("model file not found: {model_path}"));
+        tracing::warn!("model file not found: {model_path}");
+        return Err(
+            "The speech model isn't installed — open Models and download it, then try again"
+                .to_string(),
+        );
     }
     let mut params = WhisperContextParameters::default();
     params.use_gpu(true);

@@ -74,7 +74,7 @@ export function HudPill() {
         {phase === "error" && (
           <>
             <span className="text-red-400">!</span>
-            <span className="max-w-56 truncate text-sm font-medium">
+            <span className="max-w-[380px] truncate text-sm font-medium">
               {warning ?? "Something went wrong"}
             </span>
           </>

@@ -60,10 +60,25 @@ impl ModelService {
                         id: id_owned,
                         path: path.to_string_lossy().into_owned(),
                     }),
-                    Err(message) => sink.emit(EngineEvent::ModelError {
-                        id: id_owned,
-                        message,
-                    }),
+                    Err(message) => {
+                        let message = if message.contains("disk space")
+                            || message.contains("cancelled")
+                            || message.contains("resume on retry")
+                        {
+                            message
+                        } else {
+                            tracing::warn!("model download failed: {message}");
+                            format!(
+                                "Download interrupted — check your connection and press \
+                                 Download again to resume ({})",
+                                message.chars().take(120).collect::<String>()
+                            )
+                        };
+                        sink.emit(EngineEvent::ModelError {
+                            id: id_owned,
+                            message,
+                        })
+                    }
                 }
             })
             .expect("spawn download thread");

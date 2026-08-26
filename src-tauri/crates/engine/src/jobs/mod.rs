@@ -29,6 +29,14 @@ pub struct FileJobSpec {
     pub diarize: Option<DiarizeOpts>,
 }
 
+/// Short display name for a job's source file.
+fn file_label(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
+
 pub struct QueueOptions {
     pub path: String,
     pub language: String,
@@ -134,7 +142,7 @@ fn run_job(spec: &FileJobSpec, stt: &SttService, sink: &Arc<dyn EventSink>, canc
                 Err(e) => {
                     sink.emit(EngineEvent::JobError {
                         id,
-                        message: e.to_string(),
+                        message: format!("Couldn't read {}: {e}", file_label(&spec.path)),
                     });
                     return;
                 }
@@ -143,7 +151,7 @@ fn run_job(spec: &FileJobSpec, stt: &SttService, sink: &Arc<dyn EventSink>, canc
         Err(e) => {
             sink.emit(EngineEvent::JobError {
                 id,
-                message: e.to_string(),
+                message: format!("Couldn't read {}: {e}", file_label(&spec.path)),
             });
             return;
         }
@@ -195,6 +203,7 @@ fn run_job(spec: &FileJobSpec, stt: &SttService, sink: &Arc<dyn EventSink>, canc
                 });
             }
             Err(message) => {
+                let message = format!("{}: {message}", file_label(&spec.path));
                 sink.emit(EngineEvent::JobError { id, message });
                 return;
             }

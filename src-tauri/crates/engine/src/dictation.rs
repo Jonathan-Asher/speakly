@@ -114,9 +114,17 @@ impl DictationEngine {
         let sample_rate = match self.capture.start(tx) {
             Ok(rate) => rate,
             Err(e) => {
+                let message = if e.contains("no input device") {
+                    "No microphone found — connect one and try again".to_string()
+                } else {
+                    format!(
+                        "Couldn't open the microphone ({e}). If access was denied, enable \
+                         Speakly under System Settings → Privacy & Security → Microphone."
+                    )
+                };
                 self.sink.emit(EngineEvent::Warning {
                     code: "mic".into(),
-                    message: e,
+                    message,
                 });
                 self.sink.emit(EngineEvent::DictationState {
                     phase: Phase::Error,
