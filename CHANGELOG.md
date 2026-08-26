@@ -1,3 +1,10 @@
+## [2.3.1](https://github.com/Jonathan-Asher/speakly/compare/v2.3.0...v2.3.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* hotkey recorder suspends dictation hotkeys while capturing ([1403adf](https://github.com/Jonathan-Asher/speakly/commit/1403adfb7b6da416b2c3a5709b810f97d4ff94d2))
+
 # [2.3.0](https://github.com/Jonathan-Asher/speakly/compare/v2.2.0...v2.3.0) (2026-08-26)
 
 
