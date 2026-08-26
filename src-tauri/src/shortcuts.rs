@@ -6,7 +6,6 @@
 use std::sync::Arc;
 
 use speakly_engine::{DictationSpec, Engine};
-use speakly_engine_types::DictationMode;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
@@ -77,13 +76,11 @@ pub fn reregister(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -> 
 /// settings lock is dropped before any engine call — engine events run
 /// synchronously on this thread.
 pub fn handle_event(app: &AppHandle, fired: &Shortcut, state: ShortcutState) {
-    // Esc is registered only while a dictation is listening (see sink.rs);
-    // it cancels — recording is discarded, nothing is pasted.
+    // Esc is registered only while a dictation is listening; it cancels.
     if let Ok(esc) = "Escape".parse::<Shortcut>() {
         if *fired == esc {
             if state == ShortcutState::Pressed {
-                let engine = Arc::clone(&*app.state::<Arc<Engine>>());
-                engine.dictation.cancel();
+                crate::input::escape(app);
             }
             return;
         }
@@ -103,41 +100,35 @@ pub fn handle_event(app: &AppHandle, fired: &Shortcut, state: ShortcutState) {
             })
             .map(|p| (p.id.clone(), p.mode))
     };
-    let Some((profile_id, mode)) = resolved else {
+    let Some((profile_id, _mode)) = resolved else {
         return;
     };
-    let engine = Arc::clone(&*app.state::<Arc<Engine>>());
-    match (mode, state) {
-        (DictationMode::Hold, ShortcutState::Pressed) => start_profile(app, &engine, &profile_id),
-        (DictationMode::Hold, ShortcutState::Released) => engine.dictation.stop(),
-        (DictationMode::Toggle, ShortcutState::Pressed) => {
-            if engine.dictation.is_active() {
-                engine.dictation.stop();
-            } else {
-                start_profile(app, &engine, &profile_id);
-            }
-        }
-        (DictationMode::Toggle, ShortcutState::Released) => {}
+    match state {
+        ShortcutState::Pressed => crate::input::pressed(app, &profile_id),
+        ShortcutState::Released => crate::input::released(app, &profile_id),
     }
 }
 
-pub(crate) fn start_profile(app: &AppHandle, engine: &Engine, profile_id: &str) {
-    // Resolve everything and DROP the settings lock before entering the
-    // engine: `start` emits events synchronously on this thread, and event
-    // handlers (sound cue, paste prefs) read settings — holding the guard
-    // across the call self-deadlocks the main thread.
+/// Swap the running session onto another profile (combination evolved).
+pub(crate) fn retarget_profile(app: &AppHandle, engine: &Engine, profile_id: &str) {
+    if let Some(spec) = resolve_spec(app, engine, profile_id) {
+        engine.dictation.retarget(spec);
+    }
+}
+
+/// Build the engine spec for a profile. Resolves and DROPS the settings lock
+/// before the caller enters the engine: engine calls emit events synchronously
+/// on this thread, and event handlers read settings — holding the guard across
+/// them self-deadlocks (learned the hard way).
+fn resolve_spec(app: &AppHandle, engine: &Engine, profile_id: &str) -> Option<DictationSpec> {
     let spec = {
         let state = app.state::<SettingsState>();
         let settings = state.0.lock().unwrap();
-        let Some(profile) = settings.profile(profile_id) else {
-            return;
-        };
-        let Some(model) = settings.models.get(&profile.model_id) else {
-            return;
-        };
+        let profile = settings.profile(profile_id)?;
+        let model = settings.models.get(&profile.model_id)?;
         if model.path.is_empty() {
             tracing::warn!("model {} has no file; skipping", profile.model_id);
-            return;
+            return None;
         }
         DictationSpec {
             profile_id: profile.id.clone(),
@@ -148,10 +139,16 @@ pub(crate) fn start_profile(app: &AppHandle, engine: &Engine, profile_id: &str) 
             vad_model_path: None,
         }
     };
-    engine.dictation.start(DictationSpec {
+    Some(DictationSpec {
         vad_model_path: vad_model_path(app, engine),
         ..spec
-    });
+    })
+}
+
+pub(crate) fn start_profile(app: &AppHandle, engine: &Engine, profile_id: &str) {
+    if let Some(spec) = resolve_spec(app, engine, profile_id) {
+        engine.dictation.start(spec);
+    }
 }
 
 /// Managed Silero VAD file when installed; otherwise kick off a silent

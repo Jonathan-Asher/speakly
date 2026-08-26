@@ -47,7 +47,7 @@ struct SessionShared {
 }
 
 struct Active {
-    spec: DictationSpec,
+    spec: Arc<Mutex<DictationSpec>>,
     buffer: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
     started: Instant,
@@ -75,6 +75,33 @@ impl DictationEngine {
 
     pub fn is_active(&self) -> bool {
         self.active.lock().unwrap().is_some()
+    }
+
+    /// Profile of the running session, if any.
+    pub fn active_profile_id(&self) -> Option<String> {
+        self.active
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|a| a.spec.lock().unwrap().profile_id.clone())
+    }
+
+    /// Swap the running session's profile in place — the combination evolved
+    /// (e.g. a held ⌥ grew into ⌥Space). Audio keeps recording; partials use
+    /// the new spec from the next tick; the final decode uses it outright.
+    /// Returns false when no session is active.
+    pub fn retarget(&self, spec: DictationSpec) -> bool {
+        let active = self.active.lock().unwrap();
+        let Some(active) = active.as_ref() else {
+            return false;
+        };
+        let profile_id = spec.profile_id.clone();
+        *active.spec.lock().unwrap() = spec;
+        self.sink.emit(EngineEvent::DictationState {
+            phase: Phase::Listening,
+            profile_id,
+        });
+        true
     }
 
     pub fn start(&self, spec: DictationSpec) {
@@ -117,8 +144,9 @@ impl DictationEngine {
             vad: None,
             pending_stale: None,
         }));
+        let spec = Arc::new(Mutex::new(spec));
         let ticker = {
-            let spec = spec.clone();
+            let spec = Arc::clone(&spec);
             let buffer = Arc::clone(&buffer);
             let stop = Arc::clone(&ticker_stop);
             let shared = Arc::clone(&shared);
@@ -132,7 +160,7 @@ impl DictationEngine {
 
         self.sink.emit(EngineEvent::DictationState {
             phase: Phase::Listening,
-            profile_id: spec.profile_id.clone(),
+            profile_id: spec.lock().unwrap().profile_id.clone(),
         });
         *active = Some(Active {
             spec,
@@ -170,7 +198,7 @@ impl DictationEngine {
         signal_ticker(&active);
         self.sink.emit(EngineEvent::DictationState {
             phase: Phase::Idle,
-            profile_id: active.spec.profile_id.clone(),
+            profile_id: active.spec.lock().unwrap().profile_id.clone(),
         });
         // The ticker holds only Arcs; it exits on its own after the signal.
     }
@@ -205,7 +233,7 @@ fn decode_window(
 /// Streaming partials: every tick, commit any VAD-closed speech and decode the
 /// open tail as volatile text. Committed text never changes afterwards.
 fn ticker_loop(
-    spec: DictationSpec,
+    spec: Arc<Mutex<DictationSpec>>,
     buffer: Arc<Mutex<Vec<f32>>>,
     sample_rate: u32,
     stop: Arc<AtomicBool>,
@@ -213,7 +241,8 @@ fn ticker_loop(
     stt: SttService,
     sink: Arc<dyn EventSink>,
 ) {
-    if let Some(path) = &spec.vad_model_path {
+    let vad_path = spec.lock().unwrap().vad_model_path.clone();
+    if let Some(path) = &vad_path {
         match SileroVad::load(path) {
             Ok(vad) => shared.lock().unwrap().vad = Some(vad),
             Err(e) => tracing::warn!("dictation VAD unavailable: {e}"),
@@ -237,6 +266,9 @@ fn ticker_loop(
             continue;
         }
         last_tick = Instant::now();
+        // Fresh snapshot: a retarget (combination change) applies from the
+        // next tick onward.
+        let tick_spec = spec.lock().unwrap().clone();
 
         let native = buffer.lock().unwrap().clone();
         if (native.len() as f32 / sample_rate as f32) < MIN_PARTIAL_SECS {
@@ -262,7 +294,7 @@ fn ticker_loop(
 
         // Commit the closed span (its text is now immutable).
         if let Some(boundary) = boundary.filter(|b| *b > offset + min_commit) {
-            match decode_window(&stt, &spec, &audio[offset..boundary], None) {
+            match decode_window(&stt, &tick_spec, &audio[offset..boundary], None) {
                 Ok(out) => {
                     let mut sh = shared.lock().unwrap();
                     sh.state.apply_first_measurement(out.decode_ms);
@@ -287,7 +319,7 @@ fn ticker_loop(
         if tail.len() >= min_partial {
             let stale = Arc::new(AtomicBool::new(false));
             shared.lock().unwrap().pending_stale = Some(Arc::clone(&stale));
-            match decode_window(&stt, &spec, tail, Some(stale)) {
+            match decode_window(&stt, &tick_spec, tail, Some(stale)) {
                 Ok(out) => {
                     let mut sh = shared.lock().unwrap();
                     if let Some(decision) = sh.state.apply_first_measurement(out.decode_ms) {
@@ -310,7 +342,7 @@ fn ticker_loop(
         let committed = shared.lock().unwrap().state.committed_text().to_string();
         if !committed.is_empty() || !volatile.is_empty() {
             sink.emit(EngineEvent::DictationPartial {
-                profile_id: spec.profile_id.clone(),
+                profile_id: tick_spec.profile_id.clone(),
                 committed,
                 volatile,
             });
@@ -323,7 +355,7 @@ fn finalize(mut active: Active, stt: SttService, sink: Arc<dyn EventSink>) {
 
     sink.emit(EngineEvent::DictationState {
         phase: Phase::Transcribing,
-        profile_id: active.spec.profile_id.clone(),
+        profile_id: active.spec.lock().unwrap().profile_id.clone(),
     });
 
     // Give the tail of the capture callback queue a moment to drain, and let
@@ -334,13 +366,15 @@ fn finalize(mut active: Active, stt: SttService, sink: Arc<dyn EventSink>) {
     }
 
     let Active {
-        spec,
+        spec: shared_spec,
         buffer,
         sample_rate,
         started,
         shared,
         ..
     } = active;
+    // Snapshot: the combination is settled by key-up; the final profile wins.
+    let spec = shared_spec.lock().unwrap().clone();
     let native = std::mem::take(&mut *buffer.lock().unwrap());
 
     let secs = native.len() as f32 / sample_rate as f32;

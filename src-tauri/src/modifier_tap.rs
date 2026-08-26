@@ -19,8 +19,9 @@ use core_graphics::event::{
 };
 use serde_json::json;
 use speakly_engine::Engine;
-use speakly_engine_types::{DictationMode, Profile};
+use speakly_engine_types::Profile;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
 
 const CHORD_WINDOW: Duration = Duration::from_millis(150);
 
@@ -37,6 +38,101 @@ pub fn parse_bare(hotkey: &str) -> Option<u16> {
         .iter()
         .find(|(name, _)| *name == hotkey)
         .map(|(_, code)| *code)
+}
+
+/// CG virtual keycode for the combo keys we support evolving into.
+fn code_to_keycode(code: Code) -> Option<u16> {
+    use Code::*;
+    Some(match code {
+        Space => 49,
+        Enter => 36,
+        Tab => 48,
+        KeyA => 0,
+        KeyS => 1,
+        KeyD => 2,
+        KeyF => 3,
+        KeyH => 4,
+        KeyG => 5,
+        KeyZ => 6,
+        KeyX => 7,
+        KeyC => 8,
+        KeyV => 9,
+        KeyB => 11,
+        KeyQ => 12,
+        KeyW => 13,
+        KeyE => 14,
+        KeyR => 15,
+        KeyY => 16,
+        KeyT => 17,
+        Digit1 => 18,
+        Digit2 => 19,
+        Digit3 => 20,
+        Digit4 => 21,
+        Digit6 => 22,
+        Digit5 => 23,
+        Digit9 => 25,
+        Digit7 => 26,
+        Digit8 => 28,
+        Digit0 => 29,
+        KeyO => 31,
+        KeyU => 32,
+        KeyI => 34,
+        KeyP => 35,
+        KeyL => 37,
+        KeyJ => 38,
+        KeyK => 40,
+        KeyN => 45,
+        KeyM => 46,
+        F1 => 122,
+        F2 => 120,
+        F3 => 99,
+        F4 => 118,
+        F5 => 96,
+        F6 => 97,
+        F7 => 98,
+        F8 => 100,
+        F9 => 101,
+        F10 => 109,
+        F11 => 103,
+        F12 => 111,
+        ArrowLeft => 123,
+        ArrowRight => 124,
+        ArrowDown => 125,
+        ArrowUp => 126,
+        _ => return None,
+    })
+}
+
+fn mods_to_flags(mods: Modifiers) -> CGEventFlags {
+    let mut flags = CGEventFlags::CGEventFlagNull;
+    if mods.contains(Modifiers::ALT) {
+        flags |= CGEventFlags::CGEventFlagAlternate;
+    }
+    if mods.contains(Modifiers::SHIFT) {
+        flags |= CGEventFlags::CGEventFlagShift;
+    }
+    if mods.contains(Modifiers::CONTROL) {
+        flags |= CGEventFlags::CGEventFlagControl;
+    }
+    if mods.contains(Modifiers::META) || mods.contains(Modifiers::SUPER) {
+        flags |= CGEventFlags::CGEventFlagCommand;
+    }
+    flags
+}
+
+/// Registered combos as (required modifier flags, key). A keydown matching one
+/// while a bare modifier is held is a combination GROWING into a profile —
+/// never a chord to cancel on.
+fn combo_table(profiles: &[Profile]) -> Vec<(CGEventFlags, u16)> {
+    profiles
+        .iter()
+        .filter(|p| parse_bare(&p.hotkey).is_none())
+        .filter_map(|p| {
+            let shortcut: Shortcut = p.hotkey.parse().ok()?;
+            let key = code_to_keycode(shortcut.key)?;
+            Some((mods_to_flags(shortcut.mods), key))
+        })
+        .collect()
 }
 
 fn family_flag(keycode: u16) -> CGEventFlags {
@@ -59,23 +155,12 @@ impl Default for TapState {
 
 struct ActivePress {
     keycode: u16,
-    mode: DictationMode,
+    profile_id: String,
     pressed_at: Instant,
     chord_cancelled: bool,
     /// Toggle press made while recording: the stop fires on a clean release
     /// (a chord like ⌥C mid-recording must not stop-and-paste).
     toggle_stop: bool,
-}
-
-/// The profile's CURRENT mode, read at press time (a profile edit mid-press is
-/// irrelevant; across presses this always reflects the latest settings).
-fn resolve_mode(app: &AppHandle, profile_id: &str) -> DictationMode {
-    let state = app.state::<crate::settings::SettingsState>();
-    let settings = state.0.lock().unwrap();
-    settings
-        .profile(profile_id)
-        .map(|p| p.mode)
-        .unwrap_or(DictationMode::Hold)
 }
 
 /// Replace the running tap (if any) with one covering the given bare-modifier
@@ -110,14 +195,21 @@ pub fn sync(app: &AppHandle, engine: Arc<Engine>, profiles: &[Profile]) {
     *guard = Some(Arc::clone(&stop));
     drop(guard);
 
+    let combos = combo_table(profiles);
     let app = app.clone();
     std::thread::Builder::new()
         .name("speakly-modtap".into())
-        .spawn(move || tap_thread(app, engine, map, stop))
+        .spawn(move || tap_thread(app, engine, map, combos, stop))
         .expect("spawn modifier tap thread");
 }
 
-fn tap_thread(app: AppHandle, engine: Arc<Engine>, map: Vec<(u16, String)>, stop: Arc<AtomicBool>) {
+fn tap_thread(
+    app: AppHandle,
+    engine: Arc<Engine>,
+    map: Vec<(u16, String)>,
+    combos: Vec<(CGEventFlags, u16)>,
+    stop: Arc<AtomicBool>,
+) {
     let active: Arc<Mutex<Option<ActivePress>>> = Arc::new(Mutex::new(None));
     let cb_active = Arc::clone(&active);
     let cb_engine = Arc::clone(&engine);
@@ -140,40 +232,35 @@ fn tap_thread(app: AppHandle, engine: Arc<Engine>, map: Vec<(u16, String)>, stop
                     let mut slot = cb_active.lock().unwrap();
                     match (&*slot, down) {
                         (None, true) => {
-                            let mode = resolve_mode(&cb_app, profile_id);
+                            // Starts on press for zero latency (a chord within
+                            // the window cancels); a toggle press made while
+                            // recording becomes a pending stop that fires on
+                            // clean release.
                             let toggle_stop =
-                                mode == DictationMode::Toggle && cb_engine.dictation.is_active();
+                                crate::input::pressed_defer_toggle_stop(&cb_app, profile_id);
                             *slot = Some(ActivePress {
                                 keycode,
-                                mode,
+                                profile_id: profile_id.clone(),
                                 pressed_at: Instant::now(),
                                 chord_cancelled: false,
                                 toggle_stop,
                             });
-                            // Both modes START on press for zero latency (a
-                            // chord within the window cancels). A toggle press
-                            // made while recording stops on clean release so a
-                            // mid-recording chord can't stop-and-paste.
-                            if !toggle_stop {
-                                crate::shortcuts::start_profile(&cb_app, &cb_engine, profile_id);
-                            }
                         }
                         (Some(press), false) if press.keycode == keycode => {
                             let cancelled = press.chord_cancelled;
-                            let mode = press.mode;
                             let toggle_stop = press.toggle_stop;
+                            let bare_id = press.profile_id.clone();
                             *slot = None;
                             if cancelled {
                                 return CallbackResult::Keep;
                             }
-                            match mode {
-                                DictationMode::Hold => cb_engine.dictation.stop(),
-                                DictationMode::Toggle => {
-                                    if toggle_stop {
-                                        cb_engine.dictation.stop();
-                                    }
-                                    // Start already happened on press.
-                                }
+                            if toggle_stop {
+                                crate::input::toggle_stop_release(&cb_app);
+                            } else {
+                                // Hold stops (deferred); toggle no-ops; a
+                                // session retargeted onto a combo is ignored —
+                                // the combo's own release owns the stop.
+                                crate::input::released(&cb_app, &bare_id);
                             }
                         }
                         _ => {}
@@ -183,13 +270,25 @@ fn tap_thread(app: AppHandle, engine: Arc<Engine>, map: Vec<(u16, String)>, stop
                     let mut slot = cb_active.lock().unwrap();
                     if let Some(press) = slot.as_mut() {
                         if !press.chord_cancelled {
-                            if press.toggle_stop {
+                            let keycode = event
+                                .get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE)
+                                as u16;
+                            let flags = event.get_flags();
+                            let grows_into_combo = combos
+                                .iter()
+                                .any(|(mods, key)| *key == keycode && flags.contains(*mods));
+                            if grows_into_combo {
+                                // ⌥ held + Space = the ⌥Space profile: the
+                                // combination grew. The plugin fires that
+                                // combo's Pressed next, which retargets the
+                                // running session. Not a chord — don't cancel.
+                            } else if press.toggle_stop {
                                 // Pending stop: a chord means "don't stop";
                                 // recording continues untouched.
                                 press.chord_cancelled = true;
                             } else if press.pressed_at.elapsed() < CHORD_WINDOW {
-                                // Started on press (either mode); an immediate
-                                // chord like ⌥C aborts the young dictation.
+                                // An immediate unrecognized chord like ⌥C
+                                // aborts the young dictation.
                                 press.chord_cancelled = true;
                                 cb_engine.dictation.cancel();
                             }

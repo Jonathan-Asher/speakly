@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod export;
 mod hud;
+mod input;
 mod jobs_state;
 mod keychain;
 mod logs;
@@ -123,6 +124,7 @@ pub fn run() {
 
             let loaded = settings::load_or_seed(&handle);
             app.manage(SettingsState(Mutex::new(loaded.clone())));
+            app.manage(crate::input::InputState::default());
             settings::apply_general(&handle, &loaded.general);
             app.manage(jobs_state::JobsState::default());
             app.manage(modifier_tap::TapState::default());

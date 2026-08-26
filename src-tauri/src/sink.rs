@@ -17,7 +17,7 @@ pub struct AppSink {
 impl AppSink {
     fn emit_state(&self, phase: &str, profile_id: &str) {
         tray::set_state(&self.app, phase);
-        set_escape_armed(&self.app, phase == "listening");
+        crate::input::set_escape_armed(&self.app, phase == "listening");
         match phase {
             "listening" => {
                 hud::show(&self.app);
@@ -351,24 +351,6 @@ impl EventSink for AppSink {
                 });
             }
         }
-    }
-}
-
-/// Register/unregister the global Esc-to-cancel hotkey. Armed only while a
-/// dictation is actively listening so Esc behaves normally otherwise; both
-/// calls are idempotent (errors from already-(un)registered are ignored).
-fn set_escape_armed(app: &AppHandle, armed: bool) {
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    let Ok(esc) = "Escape".parse::<tauri_plugin_global_shortcut::Shortcut>() else {
-        return;
-    };
-    let result = if armed {
-        app.global_shortcut().register(esc)
-    } else {
-        app.global_shortcut().unregister(esc)
-    };
-    if let Err(e) = result {
-        tracing::debug!("escape hotkey ({armed}): {e}");
     }
 }
 
