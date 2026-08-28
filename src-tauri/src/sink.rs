@@ -61,6 +61,8 @@ impl EventSink for AppSink {
                 self.emit_state(phase.as_str(), &profile_id);
                 if phase == Phase::Error {
                     schedule_idle(&self.app, profile_id, 4_500);
+                } else if phase == Phase::Cancelled {
+                    schedule_idle(&self.app, profile_id, 900);
                 }
             }
             EngineEvent::DictationPartial {

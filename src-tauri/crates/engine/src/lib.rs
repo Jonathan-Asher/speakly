@@ -31,6 +31,8 @@ pub enum Phase {
     Idle,
     Listening,
     Transcribing,
+    /// Discarded by the user (Esc) — distinct from Idle so the UI can say so.
+    Cancelled,
     Error,
 }
 
@@ -40,6 +42,7 @@ impl Phase {
             Phase::Idle => "idle",
             Phase::Listening => "listening",
             Phase::Transcribing => "transcribing",
+            Phase::Cancelled => "cancelled",
             Phase::Error => "error",
         }
     }

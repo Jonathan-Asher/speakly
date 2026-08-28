@@ -20,5 +20,6 @@ export const strings = {
     translating: "Translating…",
     refining: "Refining…",
     pasted: "Pasted",
+    cancelled: "Cancelled",
   },
 } as const;

@@ -24,6 +24,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
 
 const CHORD_WINDOW: Duration = Duration::from_millis(150);
+/// kVK_Escape — cancels a running dictation from anywhere.
+const KEYCODE_ESCAPE: u16 = 53;
 
 /// Supported bare-modifier hotkey specs → macOS virtual keycode.
 const BARE_SPECS: &[(&str, u16)] = &[
@@ -177,11 +179,14 @@ pub fn sync(app: &AppHandle, engine: Arc<Engine>, profiles: &[Profile]) {
     if let Some(stop) = guard.take() {
         stop.store(true, Ordering::Relaxed);
     }
-    if map.is_empty() {
+    // The tap serves bare-modifier hotkeys AND Esc-to-cancel, so it is worth
+    // running whenever Accessibility allows it — not only for bare profiles.
+    let trusted = crate::paste::accessibility_trusted();
+    if map.is_empty() && !trusted {
         return;
     }
 
-    if !crate::paste::accessibility_trusted() {
+    if !map.is_empty() && !trusted {
         let _ = app.emit(
             "engine://warning",
             json!({
@@ -267,6 +272,18 @@ fn tap_thread(
                     }
                 }
                 CGEventType::KeyDown => {
+                    let code =
+                        event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
+                    if code == KEYCODE_ESCAPE {
+                        // Listen-only: the focused app still receives Esc, we
+                        // just also drop the recording.
+                        if cb_engine.dictation.is_active() {
+                            tracing::info!("escape (tap) — cancelling dictation");
+                            *cb_active.lock().unwrap() = None;
+                            crate::input::escape(&cb_app);
+                        }
+                        return CallbackResult::Keep;
+                    }
                     let mut slot = cb_active.lock().unwrap();
                     if let Some(press) = slot.as_mut() {
                         if !press.chord_cancelled {

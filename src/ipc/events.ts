@@ -9,6 +9,7 @@ export type DictationPhase =
   | "transcribing"
   | "translating"
   | "refining"
+  | "cancelled"
   | "pasting"
   | "pasted"
   | "copied"

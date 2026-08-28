@@ -148,7 +148,10 @@ pub fn toggle_stop_release(app: &AppHandle) {
 
 pub fn escape(app: &AppHandle) {
     cancel_deferred_stop(app);
-    engine(app).dictation.cancel();
+    let engine = engine(app);
+    let was_active = engine.dictation.is_active();
+    engine.dictation.cancel();
+    tracing::info!("escape — cancel (dictation was active: {was_active})");
 }
 
 /// Arm/disarm the global Esc-cancel hotkey. Always deferred to the main
@@ -168,8 +171,11 @@ pub fn set_escape_armed(app: &AppHandle, armed: bool) {
             } else {
                 handle.global_shortcut().unregister(esc)
             };
-            if let Err(e) = result {
-                tracing::debug!("escape hotkey ({armed}): {e}");
+            match result {
+                Ok(()) => {
+                    tracing::info!("escape hotkey {}", if armed { "armed" } else { "disarmed" })
+                }
+                Err(e) => tracing::warn!("escape hotkey ({armed}) failed: {e}"),
             }
         });
     });

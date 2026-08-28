@@ -71,6 +71,12 @@ export function HudPill() {
             <span className="text-sm font-medium">{strings.hud.pasted}</span>
           </>
         )}
+        {phase === "cancelled" && (
+          <>
+            <span className="text-neutral-400">✕</span>
+            <span className="text-sm font-medium">{strings.hud.cancelled}</span>
+          </>
+        )}
         {phase === "copied" && (
           <>
             <span className="text-amber-300">⧉</span>

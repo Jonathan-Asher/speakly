@@ -205,7 +205,7 @@ impl DictationEngine {
         self.capture.stop();
         signal_ticker(&active);
         self.sink.emit(EngineEvent::DictationState {
-            phase: Phase::Idle,
+            phase: Phase::Cancelled,
             profile_id: active.spec.lock().unwrap().profile_id.clone(),
         });
         // The ticker holds only Arcs; it exits on its own after the signal.

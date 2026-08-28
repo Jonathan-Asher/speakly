@@ -68,7 +68,14 @@ pub fn reregister(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -> 
     if let Err(e) = app.global_shortcut().unregister_all() {
         tracing::warn!("unregister_all failed: {e}");
     }
-    register_all(app, engine, settings)
+    // `unregister_all` also drops Esc-to-cancel; restore it when a dictation is
+    // in flight (e.g. Refine toggled from the popover mid-recording).
+    let recording = engine.dictation.is_active();
+    let errors = register_all(app, engine, settings);
+    if recording {
+        crate::input::set_escape_armed(app, true);
+    }
+    errors
 }
 
 /// The plugin's single global handler: resolve the fired shortcut to a profile
