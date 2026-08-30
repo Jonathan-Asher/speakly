@@ -125,14 +125,14 @@ fn mods_to_flags(mods: Modifiers) -> CGEventFlags {
 /// Registered combos as (required modifier flags, key). A keydown matching one
 /// while a bare modifier is held is a combination GROWING into a profile —
 /// never a chord to cancel on.
-fn combo_table(profiles: &[Profile]) -> Vec<(CGEventFlags, u16)> {
+fn combo_table(profiles: &[Profile]) -> Vec<(CGEventFlags, u16, String)> {
     profiles
         .iter()
         .filter(|p| parse_bare(&p.hotkey).is_none())
         .filter_map(|p| {
             let shortcut: Shortcut = p.hotkey.parse().ok()?;
             let key = code_to_keycode(shortcut.key)?;
-            Some((mods_to_flags(shortcut.mods), key))
+            Some((mods_to_flags(shortcut.mods), key, p.id.clone()))
         })
         .collect()
 }
@@ -163,6 +163,9 @@ struct ActivePress {
     /// Toggle press made while recording: the stop fires on a clean release
     /// (a chord like ⌥C mid-recording must not stop-and-paste).
     toggle_stop: bool,
+    /// Key whose down-event we suppressed (combination growth); its up-event
+    /// is suppressed too so other apps never see half a chord.
+    swallowed_key: Option<u16>,
 }
 
 /// Replace the running tap (if any) with one covering the given bare-modifier
@@ -212,9 +215,34 @@ fn tap_thread(
     app: AppHandle,
     engine: Arc<Engine>,
     map: Vec<(u16, String)>,
-    combos: Vec<(CGEventFlags, u16)>,
+    combos: Vec<(CGEventFlags, u16, String)>,
     stop: Arc<AtomicBool>,
 ) {
+    while !stop.load(Ordering::Relaxed) {
+        let restart = run_tap(&app, &engine, &map, &combos, &stop);
+        if !restart {
+            return;
+        }
+        tracing::warn!("event tap was disabled by the system — restarting it");
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+/// One tap lifetime. Returns true when it should be rebuilt.
+fn run_tap(
+    app: &AppHandle,
+    engine: &Arc<Engine>,
+    map: &[(u16, String)],
+    combos: &[(CGEventFlags, u16, String)],
+    stop: &Arc<AtomicBool>,
+) -> bool {
+    let app = app.clone();
+    let engine = Arc::clone(engine);
+    let map = map.to_vec();
+    let combos = combos.to_vec();
+    let stop = Arc::clone(stop);
+    let disabled = Arc::new(AtomicBool::new(false));
+    let cb_disabled = Arc::clone(&disabled);
     let active: Arc<Mutex<Option<ActivePress>>> = Arc::new(Mutex::new(None));
     let cb_active = Arc::clone(&active);
     let cb_engine = Arc::clone(&engine);
@@ -223,8 +251,15 @@ fn tap_thread(
     let result = CGEventTap::with_enabled(
         CGEventTapLocation::HID,
         CGEventTapPlacement::HeadInsertEventTap,
-        CGEventTapOptions::ListenOnly,
-        vec![CGEventType::FlagsChanged, CGEventType::KeyDown],
+        // An ACTIVE tap (not listen-only) so a keystroke that completes one of
+        // our combinations can be swallowed before other apps' global hotkeys
+        // see it. Nothing is ever dropped outside that narrow case.
+        CGEventTapOptions::Default,
+        vec![
+            CGEventType::FlagsChanged,
+            CGEventType::KeyDown,
+            CGEventType::KeyUp,
+        ],
         move |_proxy, etype, event| {
             match etype {
                 CGEventType::FlagsChanged => {
@@ -249,6 +284,7 @@ fn tap_thread(
                                 pressed_at: Instant::now(),
                                 chord_cancelled: false,
                                 toggle_stop,
+                                swallowed_key: None,
                             });
                         }
                         (Some(press), false) if press.keycode == keycode => {
@@ -275,8 +311,8 @@ fn tap_thread(
                     let code =
                         event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
                     if code == KEYCODE_ESCAPE {
-                        // Listen-only: the focused app still receives Esc, we
-                        // just also drop the recording.
+                        // Passed through: the focused app still gets its Esc,
+                        // we just also drop the recording.
                         if cb_engine.dictation.is_active() {
                             tracing::info!("escape (tap) — cancelling dictation");
                             *cb_active.lock().unwrap() = None;
@@ -284,40 +320,68 @@ fn tap_thread(
                         }
                         return CallbackResult::Keep;
                     }
+                    let flags = event.get_flags();
+                    let grown = combos
+                        .iter()
+                        .find(|(mods, key, _)| *key == code && flags.contains(*mods))
+                        .map(|(_, _, id)| id.clone());
+
+                    let mut slot = cb_active.lock().unwrap();
+                    let Some(press) = slot.as_mut() else {
+                        return CallbackResult::Keep;
+                    };
+                    if press.chord_cancelled {
+                        return CallbackResult::Keep;
+                    }
+                    if let Some(profile_id) = grown {
+                        // The held combination grew (⌥ + Space = the ⌥Space
+                        // profile). Retarget here and SWALLOW the keystroke —
+                        // otherwise whatever else claims that combination
+                        // system-wide (ChatGPT's ⌥Space, Spotlight, …) fires in
+                        // the middle of a dictation.
+                        if !cb_engine.dictation.is_active() {
+                            return CallbackResult::Keep;
+                        }
+                        press.swallowed_key = Some(code);
+                        drop(slot);
+                        tracing::info!("combination grew — retargeting to {profile_id}");
+                        crate::input::pressed(&cb_app, &profile_id);
+                        return CallbackResult::Drop;
+                    }
+                    if press.toggle_stop {
+                        // Pending stop: a chord means "don't stop"; recording
+                        // continues untouched.
+                        press.chord_cancelled = true;
+                    } else if press.pressed_at.elapsed() < CHORD_WINDOW {
+                        // An immediate unrecognized chord like ⌥C aborts the
+                        // young dictation.
+                        press.chord_cancelled = true;
+                        cb_engine.dictation.cancel();
+                    }
+                }
+                CGEventType::KeyUp => {
+                    let code =
+                        event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
                     let mut slot = cb_active.lock().unwrap();
                     if let Some(press) = slot.as_mut() {
-                        if !press.chord_cancelled {
-                            let keycode = event
-                                .get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE)
-                                as u16;
-                            let flags = event.get_flags();
-                            let grows_into_combo = combos
-                                .iter()
-                                .any(|(mods, key)| *key == keycode && flags.contains(*mods));
-                            if grows_into_combo {
-                                // ⌥ held + Space = the ⌥Space profile: the
-                                // combination grew. The plugin fires that
-                                // combo's Pressed next, which retargets the
-                                // running session. Not a chord — don't cancel.
-                            } else if press.toggle_stop {
-                                // Pending stop: a chord means "don't stop";
-                                // recording continues untouched.
-                                press.chord_cancelled = true;
-                            } else if press.pressed_at.elapsed() < CHORD_WINDOW {
-                                // An immediate unrecognized chord like ⌥C
-                                // aborts the young dictation.
-                                press.chord_cancelled = true;
-                                cb_engine.dictation.cancel();
-                            }
+                        if press.swallowed_key == Some(code) {
+                            press.swallowed_key = None;
+                            return CallbackResult::Drop;
                         }
                     }
+                }
+                CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
+                    // macOS switched us off (a stalled callback, or a security
+                    // event). Signal the pump so the tap is rebuilt — otherwise
+                    // the hotkeys silently stop working until the next restart.
+                    cb_disabled.store(true, Ordering::Relaxed);
                 }
                 _ => {}
             }
             CallbackResult::Keep
         },
         || {
-            while !stop.load(Ordering::Relaxed) {
+            while !stop.load(Ordering::Relaxed) && !disabled.load(Ordering::Relaxed) {
                 CFRunLoop::run_in_mode(
                     unsafe { kCFRunLoopDefaultMode },
                     Duration::from_millis(200),
@@ -327,7 +391,10 @@ fn tap_thread(
         },
     );
 
-    if result.is_err() {
+    if result.is_ok() {
+        return disabled.load(Ordering::Relaxed) && !stop.load(Ordering::Relaxed);
+    }
+    {
         tracing::warn!("modifier tap install failed (Accessibility missing?)");
         let _ = app.emit(
             "engine://warning",
@@ -337,4 +404,6 @@ fn tap_thread(
             }),
         );
     }
+    // Install failed (no Accessibility): retrying in a loop would spin.
+    false
 }
