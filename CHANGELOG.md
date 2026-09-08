@@ -1,3 +1,16 @@
+# [2.6.0](https://github.com/Jonathan-Asher/speakly/compare/v2.5.0...v2.6.0) (2026-09-08)
+
+
+### Bug Fixes
+
+* don't let a growing combination trigger other apps' hotkeys ([1e6390c](https://github.com/Jonathan-Asher/speakly/commit/1e6390cb60f14711dc48b7734566d69c73726b75))
+* make Esc-to-cancel actually reachable, and visible when it fires ([86ec944](https://github.com/Jonathan-Asher/speakly/commit/86ec944411dbef15ec061c93f7028f5204284003))
+
+
+### Features
+
+* **hotkeys:** side-specific modifier combinations ([cda372a](https://github.com/Jonathan-Asher/speakly/commit/cda372ae9cace8e752eac123b592dd51474e1da2))
+
 # [2.5.0](https://github.com/Jonathan-Asher/speakly/compare/v2.4.1...v2.5.0) (2026-08-26)
 
 
