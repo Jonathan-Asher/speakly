@@ -37,7 +37,16 @@ export function HotkeyRecorder({
         pendingBare.current = bare;
         return;
       }
-      // Any non-modifier key cancels a pending bare hold and may finish a combo.
+      // A key pressed while a lone modifier is held records a SIDE-SPECIFIC
+      // combination ("RightOption+KeyM"), which only that physical modifier
+      // triggers. Browser `code` values already match the accelerator names.
+      if (pendingBare.current && e.code) {
+        const sided = `${pendingBare.current}+${e.code}`;
+        pendingBare.current = null;
+        onChange(sided);
+        setRecording(false);
+        return;
+      }
       pendingBare.current = null;
       const accelerator = eventToAccelerator(e);
       if (accelerator) {

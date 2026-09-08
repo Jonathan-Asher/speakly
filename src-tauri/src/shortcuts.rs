@@ -19,7 +19,9 @@ pub fn register_all(app: &AppHandle, engine: Arc<Engine>, settings: &Settings) -
     for profile in &settings.profiles {
         // Bare-modifier specs (e.g. "RightOption") bypass the plugin and are
         // handled by the flagsChanged event tap, synced below.
-        if crate::modifier_tap::parse_bare(&profile.hotkey).is_some() {
+        if crate::modifier_tap::parse_bare(&profile.hotkey).is_some()
+            || crate::modifier_tap::parse_sided(&profile.hotkey).is_some()
+        {
             if !crate::paste::accessibility_trusted() {
                 errors.push(format!(
                     "{}: '{}' needs the Accessibility permission",
@@ -98,7 +100,10 @@ pub fn handle_event(app: &AppHandle, fired: &Shortcut, state: ShortcutState) {
         settings
             .profiles
             .iter()
-            .filter(|p| crate::modifier_tap::parse_bare(&p.hotkey).is_none())
+            .filter(|p| {
+                crate::modifier_tap::parse_bare(&p.hotkey).is_none()
+                    && crate::modifier_tap::parse_sided(&p.hotkey).is_none()
+            })
             .find(|p| {
                 p.hotkey
                     .parse::<Shortcut>()

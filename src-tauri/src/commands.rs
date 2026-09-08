@@ -634,7 +634,8 @@ pub fn upsert_profile(
     // Bare-modifier specs ("RightOption" etc.) are valid but live outside the
     // plugin's accelerator grammar; combos must parse.
     let is_bare = crate::modifier_tap::parse_bare(&profile.hotkey).is_some();
-    let parsed: Option<Shortcut> = if is_bare {
+    let is_sided = crate::modifier_tap::parse_sided(&profile.hotkey).is_some();
+    let parsed: Option<Shortcut> = if is_bare || is_sided {
         None
     } else {
         Some(
@@ -676,15 +677,30 @@ pub fn upsert_profile(
             return Err(format!("Unknown model '{}'", profile.model_id));
         }
         let clash = settings.profiles.iter().any(|p| {
-            p.id != profile.id
-                && match &parsed {
-                    Some(parsed) => p
-                        .hotkey
+            if p.id == profile.id {
+                return false;
+            }
+            match &parsed {
+                // A plain combo also collides with the side-specific form of
+                // itself: ⌥Space fires on the right Option key too.
+                Some(parsed) => {
+                    p.hotkey
                         .parse::<Shortcut>()
                         .map(|s| s == *parsed)
-                        .unwrap_or(false),
-                    None => p.hotkey == profile.hotkey,
+                        .unwrap_or(false)
+                        || crate::modifier_tap::parse_sided(&p.hotkey)
+                            .is_some_and(|sided| sided == shortcut_as_sided(parsed))
                 }
+                None => {
+                    p.hotkey == profile.hotkey
+                        || crate::modifier_tap::parse_sided(&profile.hotkey).is_some_and(|mine| {
+                            p.hotkey
+                                .parse::<Shortcut>()
+                                .map(|s| shortcut_as_sided(&s) == mine)
+                                .unwrap_or(false)
+                        })
+                }
+            }
         });
         if clash {
             return Err(format!(
@@ -779,6 +795,26 @@ pub fn quit_app(app: AppHandle) {
 #[tauri::command]
 pub fn meeting_stop(engine: State<'_, Arc<Engine>>, session_id: u64) -> Result<(), String> {
     engine.meetings.stop(session_id)
+}
+
+/// The side-specific pair a plain accelerator collides with. `⌥Space` fires on
+/// the right Option key as well, so it clashes with `RightOption+Space`.
+fn shortcut_as_sided(shortcut: &tauri_plugin_global_shortcut::Shortcut) -> (u16, u16) {
+    let modifier = if shortcut
+        .mods
+        .contains(tauri_plugin_global_shortcut::Modifiers::ALT)
+    {
+        61 // right Option
+    } else if shortcut
+        .mods
+        .contains(tauri_plugin_global_shortcut::Modifiers::META)
+    {
+        54 // right Command
+    } else {
+        0
+    };
+    let key = crate::modifier_tap::keycode_of(shortcut.key).unwrap_or(0);
+    (modifier, key)
 }
 
 /// The hotkey recorder toggles this while capturing so dictation hotkeys

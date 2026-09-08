@@ -12,9 +12,31 @@ export function isBareModifier(hotkey: string) {
   return hotkey in BARE_PRETTY;
 }
 
+/** "RightOption+KeyM" → ["RightOption", "KeyM"], else null. */
+export function splitSided(hotkey: string): [string, string] | null {
+  const at = hotkey.indexOf("+");
+  if (at < 0) return null;
+  const modifier = hotkey.slice(0, at);
+  const key = hotkey.slice(at + 1);
+  return modifier in BARE_PRETTY && key ? [modifier, key] : null;
+}
+
+/** A key name (`KeyM`, `Space`, `Digit1`) as shown to the user. */
+function prettyKey(key: string) {
+  return key
+    .replace(/^Key/, "")
+    .replace(/^Digit/, "")
+    .replace(/^Arrow/, "")
+    .replace(/^Space$/, "Space");
+}
+
 export function prettyHotkey(hotkey: string) {
   const bare = BARE_PRETTY[hotkey];
   if (bare) return bare;
+  // Side-specific combination — must be handled before the generic
+  // substitutions below, which would mangle "Right"/"Left" inside the name.
+  const sided = splitSided(hotkey);
+  if (sided) return `${BARE_PRETTY[sided[0]]} + ${prettyKey(sided[1])}`;
   return hotkey
     .replace(/Alt/g, "⌥")
     .replace(/Shift/g, "⇧")

@@ -172,8 +172,9 @@ export function ProfileEditor({
             <div className="flex flex-col gap-1">
               <HotkeyRecorder value={draft.hotkey} onChange={(hotkey) => set({ hotkey })} />
               <span className="text-xs text-neutral-400">
-                Combos work everywhere; a lone Right ⌥/⌘ (hold or toggle)
-                needs the Accessibility permission.
+                Combos work everywhere. A lone Right ⌥/⌘ — or a combination
+                built on one, like Right ⌥ + Space — is side-specific and needs
+                the Accessibility permission.
               </span>
             </div>
           </Row>
