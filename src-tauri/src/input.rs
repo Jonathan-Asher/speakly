@@ -158,6 +158,12 @@ pub fn escape(app: &AppHandle) {
 /// thread from a detached thread so it can never run inside the plugin's own
 /// dispatch (that deadlocks) nor block an engine thread.
 pub fn set_escape_armed(app: &AppHandle, armed: bool) {
+    if crate::paste::accessibility_trusted() {
+        // The event tap already watches for Esc, and does it better: it observes
+        // the key instead of claiming it, so the focused app still receives its
+        // own Esc.
+        return;
+    }
     let app = app.clone();
     std::thread::spawn(move || {
         let handle = app.clone();

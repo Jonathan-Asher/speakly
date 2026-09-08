@@ -201,6 +201,9 @@ struct ActivePress {
     /// Key whose down-event we suppressed (combination growth); its up-event
     /// is suppressed too so other apps never see half a chord.
     swallowed_key: Option<u16>,
+    /// Set once the key release already ended the dictation, so releasing the
+    /// modifier afterwards doesn't dispatch a second stop.
+    stopped: bool,
     /// Profile the session was retargeted onto by a combination. The plugin
     /// used to deliver that combo's Released; now that the tap swallows those
     /// events, the tap owns the stop — without this the recording never ends.
@@ -343,11 +346,12 @@ fn run_tap(
                                 chord_cancelled: false,
                                 toggle_stop,
                                 swallowed_key: None,
+                                stopped: false,
                                 retargeted_to: None,
                             });
                         }
                         (Some(press), false) if press.keycode == keycode => {
-                            let cancelled = press.chord_cancelled;
+                            let cancelled = press.chord_cancelled || press.stopped;
                             let toggle_stop = press.toggle_stop;
                             let bare_id = press
                                 .retargeted_to
@@ -449,12 +453,28 @@ fn run_tap(
                 CGEventType::KeyUp => {
                     let code =
                         event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
-                    let mut slot = cb_active.lock().unwrap();
-                    if let Some(press) = slot.as_mut() {
-                        if press.swallowed_key == Some(code) {
-                            press.swallowed_key = None;
-                            return CallbackResult::Drop;
+                    let ended = {
+                        let mut slot = cb_active.lock().unwrap();
+                        match slot.as_mut() {
+                            Some(press) if press.swallowed_key == Some(code) => {
+                                press.swallowed_key = None;
+                                // Hold ends when the chord is broken: letting go
+                                // of the key finishes the dictation without
+                                // waiting for the modifier to come up too.
+                                let id = press.retargeted_to.clone();
+                                if id.is_some() {
+                                    press.stopped = true;
+                                }
+                                Some(id)
+                            }
+                            _ => None,
                         }
+                    };
+                    if let Some(id) = ended {
+                        if let Some(id) = id {
+                            crate::input::released(&cb_app, &id);
+                        }
+                        return CallbackResult::Drop;
                     }
                 }
                 CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {

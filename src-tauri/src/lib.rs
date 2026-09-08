@@ -120,7 +120,16 @@ pub fn run() {
                         &PredefinedMenuItem::select_all(app, None)?,
                     ],
                 )?;
-                app.set_menu(Menu::with_items(app, &[&app_menu, &edit])?)?;
+                let window = Submenu::with_items(
+                    app,
+                    "Window",
+                    true,
+                    &[
+                        &PredefinedMenuItem::minimize(app, None)?,
+                        &PredefinedMenuItem::close_window(app, None)?,
+                    ],
+                )?;
+                app.set_menu(Menu::with_items(app, &[&app_menu, &edit, &window])?)?;
             }
 
             let loaded = settings::load_or_seed(&handle);
@@ -210,7 +219,13 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
+        .run(|app, event| {
+            if let tauri::RunEvent::Reopen { .. } = event {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
             if let tauri::RunEvent::Exit = event {
                 // ggml's Metal device asserts inside C++ static destructors at
                 // exit; skip them — the OS reclaims everything anyway.
