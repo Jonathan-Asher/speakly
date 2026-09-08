@@ -1,3 +1,10 @@
+# [2.7.0](https://github.com/Jonathan-Asher/speakly/compare/v2.6.0...v2.7.0) (2026-09-08)
+
+
+### Features
+
+* window lifecycle and end-on-key-release ([6e9d379](https://github.com/Jonathan-Asher/speakly/commit/6e9d379fabeac85ee6766019f1af2a9dbdec4c2f))
+
 # [2.6.0](https://github.com/Jonathan-Asher/speakly/compare/v2.5.0...v2.6.0) (2026-09-08)
 
 
