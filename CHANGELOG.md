@@ -1,3 +1,10 @@
+## [2.7.2](https://github.com/Jonathan-Asher/speakly/compare/v2.7.1...v2.7.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* never discard audio whose chunk decoded to nothing ([fa4807e](https://github.com/Jonathan-Asher/speakly/commit/fa4807e021f51d512a6c97c64df9fc935bcd2dbc))
+
 ## [2.7.1](https://github.com/Jonathan-Asher/speakly/compare/v2.7.0...v2.7.1) (2026-09-09)
 
 
