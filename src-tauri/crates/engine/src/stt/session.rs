@@ -62,16 +62,23 @@ impl SessionState {
     }
 
     /// Append decoded text for `[committed_offset, new_offset)`.
-    pub fn commit(&mut self, text: &str, new_offset: usize) {
+    /// Returns false when the decode produced nothing, in which case the span
+    /// is deliberately NOT marked as done: advancing past text-less audio would
+    /// discard it for good, since the final pass only decodes what follows the
+    /// committed offset. Leaving it uncommitted lets the final decode retry it
+    /// with the full utterance for context.
+    pub fn commit(&mut self, text: &str, new_offset: usize) -> bool {
         debug_assert!(new_offset >= self.committed_offset);
         let text = text.trim();
-        if !text.is_empty() {
-            if !self.committed_text.is_empty() {
-                self.committed_text.push(' ');
-            }
-            self.committed_text.push_str(text);
+        if text.is_empty() {
+            return false;
         }
+        if !self.committed_text.is_empty() {
+            self.committed_text.push(' ');
+        }
+        self.committed_text.push_str(text);
         self.committed_offset = new_offset;
+        true
     }
 
     /// Full transcript given the decoded uncommitted tail.
@@ -112,9 +119,11 @@ mod tests {
         s.commit("שלום עולם", 40_000);
         assert_eq!(s.committed_text(), "שלום עולם");
         assert_eq!(s.committed_offset(), 40_000);
-        s.commit("  ", 48_000); // whitespace-only commits still advance
+        // A text-less decode must NOT advance: that audio would be lost, since
+        // the final pass only covers what follows the committed offset.
+        assert!(!s.commit("  ", 48_000));
         assert_eq!(s.committed_text(), "שלום עולם");
-        assert_eq!(s.committed_offset(), 48_000);
+        assert_eq!(s.committed_offset(), 40_000);
         s.commit("מה נשמע", 80_000);
         assert_eq!(s.committed_text(), "שלום עולם מה נשמע");
         assert_eq!(s.full_text("טוב"), "שלום עולם מה נשמע טוב");
@@ -162,5 +171,24 @@ mod retarget_tests {
         assert_eq!(state.committed_text(), "");
         assert_eq!(state.full_text("hello world"), "hello world");
         assert_eq!(state.tick_ms, tick, "adaptive pacing survives a retarget");
+    }
+}
+
+#[cfg(test)]
+mod loss_tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_decode_never_discards_its_audio() {
+        let mut state = SessionState::new();
+        assert!(state.commit("first sentence", 16_000));
+        assert_eq!(state.committed_offset(), 16_000);
+
+        // whisper returned nothing for the next 20 seconds of speech.
+        assert!(!state.commit("   ", 340_000));
+
+        // The offset must not have moved, so the final decode still covers it.
+        assert_eq!(state.committed_offset(), 16_000);
+        assert_eq!(state.committed_text(), "first sentence");
     }
 }

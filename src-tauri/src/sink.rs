@@ -304,11 +304,41 @@ impl EventSink for AppSink {
                         let t0 = std::time::Instant::now();
                         match crate::translation::translate(&cfg, &key, &final_text) {
                             Ok(t) => {
-                                translate_ms = Some(t0.elapsed().as_millis() as u64);
-                                final_text = t;
-                                translated = cfg.enabled;
-                                refined = cfg.refine;
-                                translated_provider = Some(slug.to_string());
+                                let ms = t0.elapsed().as_millis() as u64;
+                                translate_ms = Some(ms);
+                                let before = final_text.chars().count();
+                                let after = t.chars().count();
+                                tracing::info!(
+                                    "ai stage ({}{}) via {slug}: {before} → {after} chars in {ms} ms",
+                                    if cfg.refine { "refine" } else { "" },
+                                    if cfg.enabled { "+translate" } else { "" },
+                                );
+                                // Cleanup must never swallow the message. Losing
+                                // half of a long dictation is a provider failure,
+                                // not an edit, so keep what was actually said.
+                                let gutted = before > 200 && after * 2 < before;
+                                if gutted && !cfg.enabled {
+                                    tracing::warn!(
+                                        "refine returned {after} chars for {before} — keeping the raw transcript"
+                                    );
+                                    let _ = self.app.emit(
+                                        "engine://warning",
+                                        json!({
+                                            "code": "refine",
+                                            "message": "Cleanup returned far less text than was dictated — pasted the raw transcript",
+                                        }),
+                                    );
+                                } else {
+                                    if gutted {
+                                        tracing::warn!(
+                                            "translation returned {after} chars for {before} — check the result"
+                                        );
+                                    }
+                                    final_text = t;
+                                    translated = cfg.enabled;
+                                    refined = cfg.refine;
+                                    translated_provider = Some(slug.to_string());
+                                }
                             }
                             Err(e) => {
                                 translate_ms = Some(t0.elapsed().as_millis() as u64);

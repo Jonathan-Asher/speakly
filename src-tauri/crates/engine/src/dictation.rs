@@ -318,7 +318,13 @@ fn ticker_loop(
                 Ok(out) => {
                     let mut sh = shared.lock().unwrap();
                     sh.state.apply_first_measurement(out.decode_ms);
-                    sh.state.commit(&out.text, boundary);
+                    let span_s = (boundary - offset) as f32 / 16_000.0;
+                    if sh.state.commit(&out.text, boundary) {
+                        tracing::debug!("committed {span_s:.1}s → {} chars", out.text.len());
+                    } else {
+                        // Left uncommitted on purpose — the final pass retries it.
+                        tracing::warn!("closed span of {span_s:.1}s decoded to nothing; keeping its audio for the final pass");
+                    }
                 }
                 Err(e) => tracing::debug!("commit decode failed: {e}"),
             }
@@ -415,7 +421,19 @@ fn finalize(mut active: Active, stt: SttService, sink: Arc<dyn EventSink>) {
         let mut sh = shared.lock().unwrap();
         (std::mem::take(&mut sh.state), sh.vad.take())
     };
-    let offset = state.committed_offset().min(audio.len());
+    let mut offset = state.committed_offset().min(audio.len());
+    let committed_secs = offset as f32 / 16_000.0;
+    let committed_chars = state.committed_text().chars().count();
+    // Speech runs well above one character per second in any language. Far less
+    // than that means the live pass lost chunks, so distrust it and transcribe
+    // the whole recording again rather than paste a fragment of it.
+    let distrust_committed = committed_secs > 5.0 && (committed_chars as f32) < committed_secs;
+    if distrust_committed {
+        tracing::warn!(
+            "committed transcript looks truncated ({committed_chars} chars for {committed_secs:.1}s) — re-transcribing the whole utterance"
+        );
+        offset = 0;
+    }
     let tail: &[f32] = &audio[offset..];
 
     // Trim leading/trailing silence off the tail (kills key-press noise and
@@ -441,7 +459,21 @@ fn finalize(mut active: Active, stt: SttService, sink: Arc<dyn EventSink>) {
 
     match tail_text {
         Ok((tail_text, decode_ms)) => {
-            let full = state.full_text(&tail_text);
+            let full = if distrust_committed {
+                tail_text.trim().to_string()
+            } else {
+                state.full_text(&tail_text)
+            };
+            tracing::info!(
+                "dictation finalised: {:.1}s audio | committed {:.1}s/{} chars | tail {:.1}s/{} chars | result {} chars | decode {} ms",
+                audio.len() as f32 / 16_000.0,
+                if distrust_committed { 0.0 } else { committed_secs },
+                if distrust_committed { 0 } else { committed_chars },
+                tail.len() as f32 / 16_000.0,
+                tail_text.chars().count(),
+                full.chars().count(),
+                decode_ms
+            );
             if full.is_empty() {
                 sink.emit(EngineEvent::Warning {
                     code: "no_speech".into(),
