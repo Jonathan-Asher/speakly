@@ -97,6 +97,18 @@ impl DictationEngine {
         };
         let profile_id = spec.profile_id.clone();
         *active.spec.lock().unwrap() = spec;
+        {
+            // Whatever the streaming partials already committed was decoded
+            // with the previous profile's model and language — keeping it would
+            // paste Hebrew for speech the user wanted transcribed in English.
+            // Drop it so the final decode re-runs the whole utterance under the
+            // new profile, and discard any partial still in flight.
+            let mut shared = active.shared.lock().unwrap();
+            shared.state.reset_transcript();
+            if let Some(stale) = shared.pending_stale.take() {
+                stale.store(true, Ordering::Relaxed);
+            }
+        }
         self.sink.emit(EngineEvent::DictationState {
             phase: Phase::Listening,
             profile_id,

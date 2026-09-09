@@ -44,6 +44,15 @@ impl SessionState {
         }
     }
 
+    /// Forget everything decoded so far, keeping the measured tick pacing.
+    /// Used when a dictation is retargeted onto another profile: text already
+    /// committed came out of the previous model and language, so the new
+    /// profile has to own the whole utterance.
+    pub fn reset_transcript(&mut self) {
+        self.committed_text.clear();
+        self.committed_offset = 0;
+    }
+
     pub fn committed_text(&self) -> &str {
         &self.committed_text
     }
@@ -131,5 +140,27 @@ mod tests {
         assert_eq!(s.tick_ms, STRETCHED_TICK_MS);
         assert_eq!(s.apply_first_measurement(3_000), None, "second is ignored");
         assert!(!s.partials_disabled);
+    }
+}
+
+#[cfg(test)]
+mod retarget_tests {
+    use super::*;
+
+    #[test]
+    fn reset_clears_committed_work_but_keeps_pacing() {
+        let mut state = SessionState::new();
+        state.commit("שלום עולם", 16_000);
+        assert_eq!(state.committed_offset(), 16_000);
+        assert!(!state.committed_text().is_empty());
+
+        let tick = state.tick_ms;
+        state.reset_transcript();
+
+        // The next decode must cover the whole utterance again.
+        assert_eq!(state.committed_offset(), 0);
+        assert_eq!(state.committed_text(), "");
+        assert_eq!(state.full_text("hello world"), "hello world");
+        assert_eq!(state.tick_ms, tick, "adaptive pacing survives a retarget");
     }
 }
