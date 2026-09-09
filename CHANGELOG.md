@@ -1,3 +1,10 @@
+## [2.7.1](https://github.com/Jonathan-Asher/speakly/compare/v2.7.0...v2.7.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* retargeting a dictation re-transcribes the whole utterance ([e49e587](https://github.com/Jonathan-Asher/speakly/commit/e49e58724f69d1b9545681bca711f1be4d1ae671))
+
 # [2.7.0](https://github.com/Jonathan-Asher/speakly/compare/v2.6.0...v2.7.0) (2026-09-08)
 
 
