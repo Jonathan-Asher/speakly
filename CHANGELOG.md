@@ -1,3 +1,10 @@
+## [2.8.2](https://github.com/Jonathan-Asher/speakly/compare/v2.8.1...v2.8.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* keep the recording pill on screen, and give microphones a priority order ([4e3b175](https://github.com/Jonathan-Asher/speakly/commit/4e3b175d3a19cd026124f1a431380210355673b1))
+
 ## [2.8.1](https://github.com/Jonathan-Asher/speakly/compare/v2.8.0...v2.8.1) (2026-09-10)
 
 
