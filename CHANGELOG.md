@@ -1,3 +1,10 @@
+## [2.7.3](https://github.com/Jonathan-Asher/speakly/compare/v2.7.2...v2.7.3) (2026-09-10)
+
+
+### Bug Fixes
+
+* transcribe the whole recording in one pass, not chunk by chunk ([884175c](https://github.com/Jonathan-Asher/speakly/commit/884175c8c14a02f37efbff8f2fd0460503f1a8d8))
+
 ## [2.7.2](https://github.com/Jonathan-Asher/speakly/compare/v2.7.1...v2.7.2) (2026-09-09)
 
 
