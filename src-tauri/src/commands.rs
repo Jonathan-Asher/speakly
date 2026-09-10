@@ -586,9 +586,9 @@ pub fn meeting_start(
     } else {
         None
     };
-    let mic_device = state.0.lock().unwrap().general.mic_device.clone();
+    let mic_priority = crate::settings::mic_ids(&state.0.lock().unwrap().general);
     engine.meetings.start(speakly_engine::MeetingOpts {
-        mic_device,
+        mic_priority,
         sidecar_path: sidecar.to_string_lossy().into_owned(),
         bundle_ids: args.apps,
         system: args.system,
@@ -826,14 +826,22 @@ pub fn set_hotkey_capture(app: AppHandle, active: bool) {
     crate::input::set_capture_mode(&app, active);
 }
 
-/// Selectable microphones, plus which one is currently chosen. An empty id
-/// means "system default".
+/// Everything the microphone picker needs: the connected inputs, the user's
+/// priority order, and what macOS itself currently calls the default — so
+/// "System default" can name the device instead of leaving it a guess.
 #[tauri::command]
 pub fn list_audio_devices(state: State<'_, SettingsState>) -> Value {
-    let selected = state.0.lock().unwrap().general.mic_device.clone();
-    let devices: Vec<Value> = speakly_engine::audio::capture::input_devices()
+    use speakly_engine::audio::capture;
+
+    let priority = state.0.lock().unwrap().general.mic_priority.clone();
+    let default = capture::default_input_device();
+    let devices: Vec<Value> = capture::input_devices()
         .into_iter()
         .map(|d| json!({ "id": d.id, "name": d.name }))
         .collect();
-    json!({ "devices": devices, "selected": selected })
+    json!({
+        "devices": devices,
+        "priority": priority,
+        "systemDefault": default.map(|d| json!({ "id": d.id, "name": d.name })),
+    })
 }

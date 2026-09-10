@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { invoke } from "@tauri-apps/api/core";
 import {
   checkPermissions,
   openPrivacyPane,
@@ -11,57 +10,7 @@ import { strings } from "../../lib/strings";
 import { UpdatesCard } from "./UpdatesCard";
 import { DiagnosticsCard } from "./DiagnosticsCard";
 import { AcknowledgementsCard } from "./AcknowledgementsCard";
-
-interface AudioDevice {
-  id: string;
-  name: string;
-}
-
-/** Microphone picker. Devices are matched by cpal's stable device id, so a
- * chosen mic is still recognised after a reboot or reconnection. */
-function MicrophoneRow({ selected }: { selected: string }) {
-  const [devices, setDevices] = useState<AudioDevice[]>([]);
-
-  useEffect(() => {
-    const load = () =>
-      void invoke<{ devices: AudioDevice[] }>("list_audio_devices").then((r) =>
-        setDevices(r.devices),
-      );
-    load();
-    // Microphones get plugged and unplugged while the window sits open.
-    window.addEventListener("focus", load);
-    return () => window.removeEventListener("focus", load);
-  }, []);
-
-  const missing = selected !== "" && !devices.some((d) => d.id === selected);
-
-  return (
-    <Row label="Microphone" hint="Which input to record from">
-      <div className="flex flex-col items-end gap-1">
-        <select
-          value={selected}
-          onChange={(e) =>
-            void patchSettings({ general: { mic_device: e.target.value || null } })
-          }
-          className="max-w-64 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-800"
-        >
-          <option value="">System default</option>
-          {devices.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-          {missing && <option value={selected}>Chosen microphone (not connected)</option>}
-        </select>
-        {missing && (
-          <span className="text-xs text-amber-600 dark:text-amber-400">
-            Not connected — recording falls back to the system default
-          </span>
-        )}
-      </div>
-    </Row>
-  );
-}
+import { MicrophoneCard } from "./MicrophoneCard";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -150,7 +99,6 @@ export function SettingsView() {
             onChange={(v) => void patchSettings({ general: { show_dock_icon: v } })}
           />
         </Row>
-        <MicrophoneRow selected={general.mic_device ?? ""} />
         <Row label="Theme">
           <select
             value={general.theme}
@@ -169,6 +117,8 @@ export function SettingsView() {
           />
         </Row>
       </Card>
+
+      <MicrophoneCard priority={general.mic_priority} />
 
       <Card title="Permissions">
         <Row label="Microphone" hint="Required for dictation">

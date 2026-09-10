@@ -47,9 +47,9 @@ pub async fn probe_microphone(
     settings: State<'_, crate::settings::SettingsState>,
 ) -> Result<(), String> {
     // Probe the microphone the user actually picked.
-    let device = settings.0.lock().unwrap().general.mic_device.clone();
+    let priority = crate::settings::mic_ids(&settings.0.lock().unwrap().general);
     let engine = Arc::clone(&engine);
-    tauri::async_runtime::spawn_blocking(move || engine.mic_probe(device))
+    tauri::async_runtime::spawn_blocking(move || engine.mic_probe(priority))
         .await
         .map_err(|e| e.to_string())?
 }

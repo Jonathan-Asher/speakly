@@ -144,7 +144,7 @@ fn resolve_spec(app: &AppHandle, engine: &Engine, profile_id: &str) -> Option<Di
         }
         DictationSpec {
             profile_id: profile.id.clone(),
-            mic_device: settings.general.mic_device.clone(),
+            mic_priority: settings.general.mic_priority.iter().map(|m| m.id.clone()).collect(),
             language: profile.language.clone(),
             model_id: profile.model_id.clone(),
             model_path: model.path.clone(),

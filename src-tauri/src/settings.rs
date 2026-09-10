@@ -47,14 +47,32 @@ pub enum Theme {
     Dark,
 }
 
+/// One entry in the microphone priority order.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MicChoice {
+    /// cpal's device id — stable across reboots and reconnections, unlike the
+    /// display name, so this is what selection matches on.
+    pub id: String,
+    /// Last known display name. Kept only so an entry stays recognisable in
+    /// the list while its device is unplugged and cannot be asked its name.
+    #[serde(default)]
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralSettings {
     #[serde(default = "d_true")]
     pub launch_at_login: bool,
     #[serde(default = "d_true")]
     pub show_dock_icon: bool,
-    /// Microphone to record from, as a cpal device id. None = system default.
+    /// Microphones to record from, best first. The first connected one wins,
+    /// so a headset that drops off Bluetooth falls through to the next entry.
+    /// Empty = whatever the OS calls the default.
     #[serde(default)]
+    pub mic_priority: Vec<MicChoice>,
+    /// Superseded by `mic_priority`. Still read so an existing single choice
+    /// survives the upgrade; never written back, so it fades from the file.
+    #[serde(default, skip_serializing)]
     pub mic_device: Option<String>,
     #[serde(default)]
     pub theme: Theme,
@@ -67,6 +85,7 @@ impl Default for GeneralSettings {
         Self {
             launch_at_login: true,
             show_dock_icon: true,
+            mic_priority: Vec::new(),
             mic_device: None,
             theme: Theme::System,
             sound_feedback: false,
@@ -151,11 +170,24 @@ fn migrate(s: &mut Settings) -> bool {
         .profiles
         .iter()
         .any(|p| p.id == "he-en" || p.translate.as_ref().is_some_and(|t| t.enabled));
+    let mut changed = false;
     if !has_translate_profile {
         s.profiles.push(he_en_profile());
-        return true;
+        changed = true;
     }
-    false
+    // The single `mic_device` choice became the head of a priority list.
+    if let Some(id) = s.general.mic_device.take() {
+        if s.general.mic_priority.is_empty() {
+            let name = speakly_engine::audio::capture::input_devices()
+                .into_iter()
+                .find(|d| d.id == id)
+                .map(|d| d.name)
+                .unwrap_or_else(|| id.clone());
+            s.general.mic_priority.push(MicChoice { id, name });
+        }
+        changed = true;
+    }
+    changed
 }
 
 pub fn save(app: &AppHandle, settings: &Settings) {
@@ -247,6 +279,11 @@ fn seed() -> Settings {
 
 /// Apply side effects of the general settings: Dock icon presence and
 /// launch-at-login registration. Called at startup and on every change.
+/// The priority order as plain device ids, which is all the engine needs.
+pub fn mic_ids(general: &GeneralSettings) -> Vec<String> {
+    general.mic_priority.iter().map(|m| m.id.clone()).collect()
+}
+
 pub fn apply_general(app: &AppHandle, general: &GeneralSettings) {
     {
         let policy = if general.show_dock_icon {
