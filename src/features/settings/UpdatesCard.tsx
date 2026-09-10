@@ -14,9 +14,9 @@ type UpdateState =
   | { kind: "ready" }
   | { kind: "error"; message: string };
 
-/// Quit and relaunch into the version just installed. Deliberately not
-/// `relaunch()` from the process plugin — see the `restart_app` command for
-/// why that one can never come back up in this app.
+/** Quit and relaunch into the version just installed. Deliberately not
+ * `relaunch()` from the process plugin — see the `restart_app` command for
+ * why that one can never come back up in this app. */
 const restart = () => invoke("restart_app");
 
 /** App updates: manual check, download with progress, then relaunch on its

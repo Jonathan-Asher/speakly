@@ -132,3 +132,22 @@ to ad-hoc signing.
 minisign key whose public half is in `tauri.conf.json`; only the release
 workflow holds the private half, so a locally built `.tar.gz` will not install
 as an update (and the local build prints a key-mismatch warning saying so).
+
+Installing writes `relaunching <path>` and the app comes back on its own. It
+does not use `tauri_plugin_process::relaunch`, which cannot work here: that
+asks Tauri to exit and relies on Tauri re-spawning the binary *after* the
+`RunEvent::Exit` callback returns, and ours never returns — it `_exit`s to
+skip ggml's Metal destructors. The exit handler does the spawn itself.
+
+**"Could not fetch a valid release JSON from the remote"** means
+`/releases/latest/download/latest.json` did not come back as JSON. This used
+to happen on every single release: semantic-release published the GitHub
+release seconds after the push, and the build uploaded `latest.json` to it ten
+minutes later, so for that whole window the latest release had no assets and
+every running app's update check failed. The release is now held as a draft —
+invisible to `/releases/latest` — until its assets are uploaded. If the error
+comes back, check whether the newest release has assets:
+
+```
+gh release view --json tagName,isDraft,assets
+```

@@ -84,7 +84,7 @@ jobs:
         run: |
           printf '%s' "$APPLE_API_KEY_CONTENT" > "$GITHUB_WORKSPACE/api-key.p8"
           chmod 600 "$GITHUB_WORKSPACE/api-key.p8"
-      - name: Build, sign, notarize, publish the release
+      - name: Build, sign, notarize, upload the release assets
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -99,8 +99,18 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ env.RELEASE_TAG }}
-          releaseDraft: false
+          # Stay a draft through the upload. semantic-release created this
+          # release minutes ago; publishing it before the assets land makes it
+          # the "latest" release with no latest.json in it, and every running
+          # app's update check fails with "could not fetch a valid release
+          # JSON" for as long as the build takes. Drafts are invisible to
+          # /releases/latest, so nothing sees a half-built release.
+          releaseDraft: true
           args: --bundles dmg,app
+      - name: Publish the release now that its assets are uploaded
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest
       - name: Remove the notarization key
         if: always()
         run: rm -f "$GITHUB_WORKSPACE/api-key.p8"
