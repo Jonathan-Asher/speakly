@@ -1,3 +1,10 @@
+## [2.8.3](https://github.com/Jonathan-Asher/speakly/compare/v2.8.2...v2.8.3) (2026-09-10)
+
+
+### Bug Fixes
+
+* keep the microphone list live, and show the fallback chain end to end ([324bedb](https://github.com/Jonathan-Asher/speakly/commit/324bedb4f1ad81204e3e20adc10606c05eaa7573))
+
 ## [2.8.2](https://github.com/Jonathan-Asher/speakly/compare/v2.8.1...v2.8.2) (2026-09-10)
 
 
