@@ -31,7 +31,12 @@ else
   exit 1
 fi
 
-# createUpdaterArtifacts signs the update archive with the updater key.
+# createUpdaterArtifacts insists on an updater key, so give it the local one.
+# Note the .tar.gz it produces is a throwaway: this key is not the one the app
+# trusts (that private half lives only in the TAURI_SIGNING_PRIVATE_KEY repo
+# secret), so tauri prints a key-mismatch warning here. Harmless — local builds
+# install straight into /Applications and never go through the updater. Real
+# updates come from the release workflow, which signs with the trusted key.
 export TAURI_SIGNING_PRIVATE_KEY="$(cat "$HOME/.tauri/speakly-updater.key")"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 
