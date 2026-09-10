@@ -1,3 +1,10 @@
+## [2.8.1](https://github.com/Jonathan-Asher/speakly/compare/v2.8.0...v2.8.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* swallow Escape when it cancels a dictation ([e900faf](https://github.com/Jonathan-Asher/speakly/commit/e900faf74d9dc29ddfe0afd8b29ee90cedac1acb))
+
 # [2.8.0](https://github.com/Jonathan-Asher/speakly/compare/v2.7.3...v2.8.0) (2026-09-10)
 
 
