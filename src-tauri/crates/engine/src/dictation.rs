@@ -421,22 +421,17 @@ fn finalize(mut active: Active, stt: SttService, sink: Arc<dyn EventSink>) {
         let mut sh = shared.lock().unwrap();
         (std::mem::take(&mut sh.state), sh.vad.take())
     };
-    let mut offset = state.committed_offset().min(audio.len());
-    let committed_secs = offset as f32 / 16_000.0;
-    let committed_chars = state.committed_text().chars().count();
-    // Speech runs well above one character per second in any language. Far less
-    // than that means the live pass lost chunks, so distrust it and transcribe
-    // the whole recording again rather than paste a fragment of it.
-    let distrust_committed = committed_secs > 5.0 && (committed_chars as f32) < committed_secs;
-    if distrust_committed {
-        tracing::warn!(
-            "committed transcript looks truncated ({committed_chars} chars for {committed_secs:.1}s) — re-transcribing the whole utterance"
-        );
-        offset = 0;
-    }
-    let tail: &[f32] = &audio[offset..];
+    // The live pass is for the on-screen preview ONLY. Its chunk-sized decodes
+    // are far worse than one pass over the whole recording — whisper has almost
+    // no context in a two-second window, and measurements showed those chunks
+    // yielding a couple of characters where a single pass produced full
+    // sentences. So the pasted text always comes from one decode of everything.
+    // It is nearly free: a minute of audio decodes in about a second here.
+    let preview_secs = state.committed_offset().min(audio.len()) as f32 / 16_000.0;
+    let preview_chars = state.committed_text().chars().count();
+    let tail: &[f32] = &audio;
 
-    // Trim leading/trailing silence off the tail (kills key-press noise and
+    // Trim leading/trailing silence (kills key-press noise and
     // silence-hallucinations); pure silence skips the decode entirely.
     let mut trimmed: Option<Vec<f32>> = None;
     let mut tail_is_silence = false;
@@ -459,18 +454,21 @@ fn finalize(mut active: Active, stt: SttService, sink: Arc<dyn EventSink>) {
 
     match tail_text {
         Ok((tail_text, decode_ms)) => {
-            let full = if distrust_committed {
-                tail_text.trim().to_string()
+            let decoded = tail_text.trim().to_string();
+            // Only fall back to the preview if the full decode produced nothing
+            // — pasting a rough preview beats pasting nothing at all.
+            let full = if decoded.is_empty() && preview_chars > 0 {
+                tracing::warn!("full decode came back empty; falling back to the live preview");
+                state.committed_text().to_string()
             } else {
-                state.full_text(&tail_text)
+                decoded
             };
             tracing::info!(
-                "dictation finalised: {:.1}s audio | committed {:.1}s/{} chars | tail {:.1}s/{} chars | result {} chars | decode {} ms",
+                "dictation finalised: {:.1}s audio | preview {:.1}s/{} chars | decoded {:.1}s → {} chars | decode {} ms",
                 audio.len() as f32 / 16_000.0,
-                if distrust_committed { 0.0 } else { committed_secs },
-                if distrust_committed { 0 } else { committed_chars },
+                preview_secs,
+                preview_chars,
                 tail.len() as f32 / 16_000.0,
-                tail_text.chars().count(),
                 full.chars().count(),
                 decode_ms
             );
