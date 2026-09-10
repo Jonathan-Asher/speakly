@@ -115,16 +115,37 @@ export function MicrophoneCard({ priority }: { priority: MicChoice[] }) {
             </li>
           );
         })}
+        {/* Always the last resort, whatever the list says — so show it as the
+            final link in the chain rather than leaving it implied. */}
+        <li
+          className={`flex items-center gap-3 rounded-lg border border-dashed px-3 py-2 ${
+            inUse === null
+              ? "border-accent/40 bg-accent/5"
+              : "border-neutral-200 dark:border-neutral-800"
+          }`}
+        >
+          <span className="w-4 shrink-0 text-xs tabular-nums text-neutral-400">
+            {priority.length + 1}
+          </span>
+          <span
+            aria-hidden
+            className="size-2 shrink-0 rounded-full bg-neutral-300 dark:bg-neutral-600"
+          />
+          <span className="min-w-0 flex-1 truncate text-sm text-neutral-500">
+            System default
+            {systemDefault && (
+              <span className="text-neutral-400"> ({systemDefault.name})</span>
+            )}
+          </span>
+          <span className="shrink-0 text-xs text-neutral-400">
+            {inUse === null ? "In use" : "Fallback"}
+          </span>
+        </li>
       </ul>
 
       <div className="mt-3 flex items-center justify-between gap-4">
         <span className="text-xs text-neutral-400">
-          {inUse === null && (
-            <>
-              Using the system default
-              {systemDefault && ` (${systemDefault.name})`}
-            </>
-          )}
+          {priority.length === 0 && "Add one to override what macOS picks."}
         </span>
         <select
           value=""

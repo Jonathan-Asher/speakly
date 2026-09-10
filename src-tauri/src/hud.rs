@@ -222,7 +222,11 @@ fn target_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
                 return hit;
             }
         }
-        tracing::warn!("no monitor contains the cursor at {:.0},{:.0}", pos.x, pos.y);
+        tracing::warn!(
+            "no monitor contains the cursor at {:.0},{:.0}",
+            pos.x,
+            pos.y
+        );
     }
     app.primary_monitor().ok().flatten()
 }

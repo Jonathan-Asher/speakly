@@ -29,7 +29,9 @@ enum Cmd {
     /// A live stream reported that its device vanished. `generation` says
     /// which stream complained, so a late error from one already replaced
     /// cannot trigger a second switch.
-    DeviceLost { generation: u64 },
+    DeviceLost {
+        generation: u64,
+    },
     Stop,
 }
 
@@ -362,9 +364,7 @@ mod tests {
     #[test]
     fn halving_the_rate_halves_the_sample_count() {
         let mut lerp = Lerp::new(48_000, 24_000);
-        let total: usize = (0..4)
-            .map(|_| lerp.push(&vec![0.5; 480]).len())
-            .sum();
+        let total: usize = (0..4).map(|_| lerp.push(&vec![0.5; 480]).len()).sum();
         // 1920 in at 2:1, within one sample of 960 out across the buffers.
         assert!((total as i64 - 960).abs() <= 1, "got {total}");
     }
@@ -377,7 +377,10 @@ mod tests {
         for buffer in 0..3 {
             let input: Vec<f32> = (0..256).map(|i| (buffer * 256 + i) as f32).collect();
             for sample in lerp.push(&input) {
-                assert!(sample >= last, "went backwards at {count}: {sample} < {last}");
+                assert!(
+                    sample >= last,
+                    "went backwards at {count}: {sample} < {last}"
+                );
                 last = sample;
                 count += 1;
             }
