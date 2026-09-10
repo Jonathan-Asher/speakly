@@ -1,3 +1,10 @@
+## [2.8.4](https://github.com/Jonathan-Asher/speakly/compare/v2.8.3...v2.8.4) (2026-09-10)
+
+
+### Bug Fixes
+
+* let the capture thread exit when its service is dropped ([519d69e](https://github.com/Jonathan-Asher/speakly/commit/519d69ee0e1a9359332d07e1a3ef5a60cce303f7))
+
 ## [2.8.3](https://github.com/Jonathan-Asher/speakly/compare/v2.8.2...v2.8.3) (2026-09-10)
 
 
