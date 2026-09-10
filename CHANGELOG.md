@@ -1,3 +1,10 @@
+# [2.8.0](https://github.com/Jonathan-Asher/speakly/compare/v2.7.3...v2.8.0) (2026-09-10)
+
+
+### Features
+
+* choose which microphone to record from ([cce7841](https://github.com/Jonathan-Asher/speakly/commit/cce784165ec650278bda5eb92a166d9c5667c48f))
+
 ## [2.7.3](https://github.com/Jonathan-Asher/speakly/compare/v2.7.2...v2.7.3) (2026-09-10)
 
 
