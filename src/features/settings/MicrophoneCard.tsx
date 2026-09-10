@@ -27,9 +27,15 @@ export function MicrophoneCard({ priority }: { priority: MicChoice[] }) {
     const load = () =>
       void invoke<AudioDevices>("list_audio_devices").then(setAvailable);
     load();
-    // Microphones get plugged and unplugged while the window sits open.
+    // Microphones get plugged and unplugged while this panel sits open, and
+    // the whole panel is about which of them are reachable — so poll rather
+    // than wait for a focus event that pairing a headset never sends.
+    const timer = setInterval(load, 3000);
     window.addEventListener("focus", load);
-    return () => window.removeEventListener("focus", load);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", load);
+    };
   }, []);
 
   const { devices, systemDefault } = available;
