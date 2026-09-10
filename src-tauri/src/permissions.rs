@@ -42,9 +42,14 @@ pub fn check_permissions() -> Value {
 /// the system microphone prompt on first use — exactly what onboarding wants
 /// from a user-initiated button.
 #[tauri::command]
-pub async fn probe_microphone(engine: State<'_, Arc<Engine>>) -> Result<(), String> {
+pub async fn probe_microphone(
+    engine: State<'_, Arc<Engine>>,
+    settings: State<'_, crate::settings::SettingsState>,
+) -> Result<(), String> {
+    // Probe the microphone the user actually picked.
+    let device = settings.0.lock().unwrap().general.mic_device.clone();
     let engine = Arc::clone(&engine);
-    tauri::async_runtime::spawn_blocking(move || engine.mic_probe())
+    tauri::async_runtime::spawn_blocking(move || engine.mic_probe(device))
         .await
         .map_err(|e| e.to_string())?
 }

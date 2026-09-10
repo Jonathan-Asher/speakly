@@ -8,6 +8,8 @@ export interface AppSettings {
   general: {
     launch_at_login: boolean;
     show_dock_icon: boolean;
+    /** cpal device id of the chosen microphone; null = system default. */
+    mic_device: string | null;
     theme: Theme;
     sound_feedback: boolean;
   };

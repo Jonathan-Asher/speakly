@@ -80,6 +80,7 @@ pub fn run() {
             commands::show_main_window,
             commands::quit_app,
             commands::set_hotkey_capture,
+            commands::list_audio_devices,
             commands::queue_file_jobs,
             commands::cancel_job,
             commands::rename_speaker,

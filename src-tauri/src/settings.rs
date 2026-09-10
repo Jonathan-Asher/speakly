@@ -53,6 +53,9 @@ pub struct GeneralSettings {
     pub launch_at_login: bool,
     #[serde(default = "d_true")]
     pub show_dock_icon: bool,
+    /// Microphone to record from, as a cpal device id. None = system default.
+    #[serde(default)]
+    pub mic_device: Option<String>,
     #[serde(default)]
     pub theme: Theme,
     #[serde(default)]
@@ -64,6 +67,7 @@ impl Default for GeneralSettings {
         Self {
             launch_at_login: true,
             show_dock_icon: true,
+            mic_device: None,
             theme: Theme::System,
             sound_feedback: false,
         }

@@ -14,9 +14,37 @@ pub struct CaptureService {
 enum Cmd {
     Start {
         out: Sender<Vec<f32>>,
+        /// Preferred input device by name; None (or a device that is no longer
+        /// connected) falls back to the system default.
+        device: Option<String>,
         reply: Sender<Result<u32, String>>,
     },
     Stop,
+}
+
+/// One selectable microphone. The id is cpal's stable device id — it survives
+/// reboots and reconnections, unlike the display name, so that is what gets
+/// stored in settings.
+pub struct InputDevice {
+    pub id: String,
+    pub name: String,
+}
+
+pub fn input_devices() -> Vec<InputDevice> {
+    let host = cpal::default_host();
+    let Ok(devices) = host.input_devices() else {
+        return Vec::new();
+    };
+    devices
+        .filter_map(|d| {
+            let id = d.id().ok()?.to_string();
+            let name = d
+                .description()
+                .map(|desc| desc.name().to_string())
+                .unwrap_or_else(|_| id.clone());
+            Some(InputDevice { id, name })
+        })
+        .collect()
 }
 
 impl CaptureService {
@@ -32,11 +60,12 @@ impl CaptureService {
     /// Open the default input device and start streaming mono f32 chunks into
     /// `out`. Returns the device's native sample rate. The `out` sender is
     /// dropped when capture stops, closing the channel.
-    pub fn start(&self, out: Sender<Vec<f32>>) -> Result<u32, String> {
+    pub fn start(&self, out: Sender<Vec<f32>>, device: Option<String>) -> Result<u32, String> {
         let (reply_tx, reply_rx) = bounded(1);
         self.cmd_tx
             .send(Cmd::Start {
                 out,
+                device,
                 reply: reply_tx,
             })
             .map_err(|_| "capture thread gone".to_string())?;
@@ -57,7 +86,7 @@ fn capture_thread(cmd_rx: Receiver<Cmd>) {
 
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
-            Cmd::Start { out, reply } => match open_stream(out) {
+            Cmd::Start { out, device, reply } => match open_stream(out, device) {
                 Ok((stream, rate)) => {
                     // Drop any previous stream, hold the new one alive.
                     drop(active.replace(stream));
@@ -72,11 +101,31 @@ fn capture_thread(cmd_rx: Receiver<Cmd>) {
     }
 }
 
-fn open_stream(out: Sender<Vec<f32>>) -> Result<(cpal::Stream, u32), String> {
+fn open_stream(
+    out: Sender<Vec<f32>>,
+    preferred: Option<String>,
+) -> Result<(cpal::Stream, u32), String> {
     let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or("no input device available")?;
+    let chosen = preferred.as_deref().and_then(|want| {
+        host.input_devices()
+            .ok()
+            .and_then(|mut ds| ds.find(|d| d.id().is_ok_and(|id| id.to_string() == want)))
+    });
+    let device = match chosen {
+        Some(device) => device,
+        None => {
+            if let Some(want) = preferred.as_deref() {
+                // Unplugged headset, say — record from the default rather than
+                // failing the dictation outright.
+                tracing::warn!("microphone '{want}' is not available — using the system default");
+            }
+            host.default_input_device()
+                .ok_or("no input device available")?
+        }
+    };
+    if let Ok(desc) = device.description() {
+        tracing::debug!("recording from '{}'", desc.name());
+    }
     let config = device
         .default_input_config()
         .map_err(|e| format!("input config: {e}"))?;

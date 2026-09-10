@@ -27,6 +27,8 @@ pub struct MeetingOpts {
     pub bundle_ids: Vec<String>,
     pub system: bool,
     pub mic: bool,
+    /// Input device by name for the mic leg; None means the system default.
+    pub mic_device: Option<String>,
     pub model_id: String,
     pub model_path: String,
     pub language: String,
@@ -94,7 +96,7 @@ impl MeetingService {
         if opts.mic {
             let capture = CaptureService::spawn();
             let (tx, rx) = unbounded::<Vec<f32>>();
-            match capture.start(tx) {
+            match capture.start(tx, opts.mic_device.clone()) {
                 Ok(rate) => {
                     mic_state.lock().unwrap().1 = rate;
                     let collector = Arc::clone(&mic_state);

@@ -586,7 +586,9 @@ pub fn meeting_start(
     } else {
         None
     };
+    let mic_device = state.0.lock().unwrap().general.mic_device.clone();
     engine.meetings.start(speakly_engine::MeetingOpts {
+        mic_device,
         sidecar_path: sidecar.to_string_lossy().into_owned(),
         bundle_ids: args.apps,
         system: args.system,
@@ -822,4 +824,16 @@ fn shortcut_as_sided(shortcut: &tauri_plugin_global_shortcut::Shortcut) -> (u16,
 #[tauri::command]
 pub fn set_hotkey_capture(app: AppHandle, active: bool) {
     crate::input::set_capture_mode(&app, active);
+}
+
+/// Selectable microphones, plus which one is currently chosen. An empty id
+/// means "system default".
+#[tauri::command]
+pub fn list_audio_devices(state: State<'_, SettingsState>) -> Value {
+    let selected = state.0.lock().unwrap().general.mic_device.clone();
+    let devices: Vec<Value> = speakly_engine::audio::capture::input_devices()
+        .into_iter()
+        .map(|d| json!({ "id": d.id, "name": d.name }))
+        .collect();
+    json!({ "devices": devices, "selected": selected })
 }

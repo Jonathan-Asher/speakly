@@ -27,6 +27,8 @@ pub struct DictationSpec {
     pub model_path: String,
     /// Scale down the encoder context for speed (validated per model).
     pub scale_audio_ctx: bool,
+    /// Input device by name; None means the system default.
+    pub mic_device: Option<String>,
     /// Silero ggml file for live segmentation + silence trimming; `None`
     /// (not yet downloaded) degrades gracefully to final-only behavior.
     pub vad_model_path: Option<String>,
@@ -123,7 +125,7 @@ impl DictationEngine {
         }
 
         let (tx, rx) = unbounded::<Vec<f32>>();
-        let sample_rate = match self.capture.start(tx) {
+        let sample_rate = match self.capture.start(tx, spec.mic_device.clone()) {
             Ok(rate) => rate,
             Err(e) => {
                 let message = if e.contains("no input device") {
