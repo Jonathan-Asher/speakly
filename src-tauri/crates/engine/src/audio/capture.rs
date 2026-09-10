@@ -26,12 +26,6 @@ enum Cmd {
         priority: Vec<String>,
         reply: Sender<Result<u32, String>>,
     },
-    /// A live stream reported that its device vanished. `generation` says
-    /// which stream complained, so a late error from one already replaced
-    /// cannot trigger a second switch.
-    DeviceLost {
-        generation: u64,
-    },
     Stop,
 }
 
@@ -69,10 +63,9 @@ fn describe(device: &cpal::Device) -> Option<InputDevice> {
 impl CaptureService {
     pub fn spawn() -> Self {
         let (cmd_tx, cmd_rx) = unbounded::<Cmd>();
-        let loopback = cmd_tx.clone();
         std::thread::Builder::new()
             .name("speakly-capture".into())
-            .spawn(move || capture_thread(cmd_rx, loopback))
+            .spawn(move || capture_thread(cmd_rx))
             .expect("spawn capture thread");
         Self { cmd_tx }
     }
@@ -119,92 +112,123 @@ struct Session {
 /// How many mid-recording device swaps one capture may make.
 const MAX_SWAPS: u8 = 3;
 
-fn capture_thread(cmd_rx: Receiver<Cmd>, loopback: Sender<Cmd>) {
-    // The live stream (and the `out` clone captured by its callback) lives
-    // here; dropping it stops CoreAudio callbacks.
-    let mut active: Option<cpal::Stream> = None;
-    // The master `out` clone lives in the session, so the channel stays open
-    // across a device swap and closes only on Stop.
-    let mut session: Option<Session> = None;
-    let mut generation: u64 = 0;
+fn capture_thread(cmd_rx: Receiver<Cmd>) {
+    // Device losses are reported by the stream error callbacks on their own
+    // channel rather than back through `cmd_rx`. Holding a `Cmd` sender in
+    // here would stop `cmd_rx` from ever disconnecting, and that disconnect is
+    // exactly what ends this thread when its `CaptureService` is dropped.
+    let (lost_tx, lost_rx) = unbounded::<u64>();
+    let mut capture = Capture {
+        active: None,
+        session: None,
+        generation: 0,
+        lost_tx,
+    };
 
-    while let Ok(cmd) = cmd_rx.recv() {
-        match cmd {
-            Cmd::Start {
-                out,
-                priority,
-                reply,
-            } => {
-                generation += 1;
-                match open_stream(out.clone(), &priority, None, &loopback, generation) {
-                    Ok(opened) => {
-                        drop(active.replace(opened.stream));
-                        let rate = opened.rate;
-                        session = Some(Session {
-                            out,
-                            priority,
-                            rate,
-                            name: opened.name,
-                            generation,
-                            swaps: 0,
-                        });
-                        let _ = reply.send(Ok(rate));
-                    }
-                    Err(e) => {
-                        drop(active.take());
-                        session = None;
-                        let _ = reply.send(Err(e));
-                    }
-                }
+    loop {
+        crossbeam_channel::select! {
+            recv(cmd_rx) -> cmd => match cmd {
+                Ok(Cmd::Start { out, priority, reply }) => capture.start(out, priority, reply),
+                Ok(Cmd::Stop) => capture.stop(),
+                // The service is gone, so no further command can arrive.
+                Err(_) => break,
+            },
+            recv(lost_rx) -> generation => if let Ok(g) = generation { capture.failover(g) },
+        }
+    }
+}
+
+/// Mutable state of the capture thread, kept in one place so each `select!`
+/// arm is a single call.
+struct Capture {
+    /// The live stream (and the `out` clone captured by its callback);
+    /// dropping it stops CoreAudio callbacks.
+    active: Option<cpal::Stream>,
+    /// The master `out` clone lives here, so the channel stays open across a
+    /// device swap and closes only on stop.
+    session: Option<Session>,
+    generation: u64,
+    lost_tx: Sender<u64>,
+}
+
+impl Capture {
+    fn start(
+        &mut self,
+        out: Sender<Vec<f32>>,
+        priority: Vec<String>,
+        reply: Sender<Result<u32, String>>,
+    ) {
+        self.generation += 1;
+        match open_stream(out.clone(), &priority, None, &self.lost_tx, self.generation) {
+            Ok(opened) => {
+                drop(self.active.replace(opened.stream));
+                let rate = opened.rate;
+                self.session = Some(Session {
+                    out,
+                    priority,
+                    rate,
+                    name: opened.name,
+                    generation: self.generation,
+                    swaps: 0,
+                });
+                let _ = reply.send(Ok(rate));
             }
-            Cmd::DeviceLost { generation: from } => {
-                let Some(current) = session.as_mut() else {
-                    continue;
-                };
-                if current.generation != from {
-                    continue;
-                }
-                if current.swaps >= MAX_SWAPS {
-                    tracing::warn!(
-                        "microphone '{}' keeps dropping out — giving up after {MAX_SWAPS} \
-                         switches",
-                        current.name
-                    );
-                    continue;
-                }
-                current.swaps += 1;
-                // Release the dead device before re-enumerating, or it can
-                // still show up as connected and get picked straight back.
-                drop(active.take());
-                generation += 1;
-                match open_stream(
-                    current.out.clone(),
-                    &current.priority,
-                    Some(current.rate),
-                    &loopback,
-                    generation,
-                ) {
-                    Ok(opened) => {
-                        tracing::warn!(
-                            "microphone '{}' disconnected mid-recording — switched to '{}'",
-                            current.name,
-                            opened.name
-                        );
-                        active = Some(opened.stream);
-                        current.name = opened.name;
-                        current.generation = generation;
-                    }
-                    Err(e) => tracing::warn!(
-                        "microphone '{}' disconnected mid-recording and no replacement \
-                         could be opened: {e}",
-                        current.name
-                    ),
-                }
+            Err(e) => {
+                self.stop();
+                let _ = reply.send(Err(e));
             }
-            Cmd::Stop => {
-                drop(active.take());
-                session = None;
+        }
+    }
+
+    fn stop(&mut self) {
+        drop(self.active.take());
+        self.session = None;
+    }
+
+    /// Reopen on the next available microphone after the live one vanished.
+    /// `from` is the generation of the stream that complained, so a late error
+    /// from one already replaced cannot trigger a second switch.
+    fn failover(&mut self, from: u64) {
+        let Some(current) = self.session.as_mut() else {
+            return;
+        };
+        if current.generation != from {
+            return;
+        }
+        if current.swaps >= MAX_SWAPS {
+            tracing::warn!(
+                "microphone '{}' keeps dropping out — giving up after {MAX_SWAPS} switches",
+                current.name
+            );
+            return;
+        }
+        current.swaps += 1;
+        // Release the dead device before re-enumerating, or it can still show
+        // up as connected and get picked straight back.
+        drop(self.active.take());
+        self.generation += 1;
+        match open_stream(
+            current.out.clone(),
+            &current.priority,
+            Some(current.rate),
+            &self.lost_tx,
+            self.generation,
+        ) {
+            Ok(opened) => {
+                tracing::warn!(
+                    "microphone '{}' disconnected mid-recording — switched to '{}'",
+                    current.name,
+                    opened.name
+                );
+                self.active = Some(opened.stream);
+                current.name = opened.name;
+                current.generation = self.generation;
             }
+            Err(e) => tracing::warn!(
+                "microphone '{}' disconnected mid-recording and no replacement could be \
+                 opened: {e}",
+                current.name
+            ),
         }
     }
 }
@@ -241,7 +265,7 @@ fn open_stream(
     out: Sender<Vec<f32>>,
     priority: &[String],
     lock_rate: Option<u32>,
-    loopback: &Sender<Cmd>,
+    lost_tx: &Sender<u64>,
     generation: u64,
 ) -> Result<Opened, String> {
     let host = cpal::default_host();
@@ -278,7 +302,7 @@ fn open_stream(
 
     tracing::info!("recording from '{name}' at {native} Hz");
     let channels = supported.channels() as usize;
-    let lost = loopback.clone();
+    let lost = lost_tx.clone();
     let lost_name = name.clone();
     let stream = device
         .build_input_stream(
@@ -299,7 +323,7 @@ fn open_stream(
             move |e| match e.kind() {
                 ErrorKind::DeviceNotAvailable => {
                     tracing::warn!("capture device '{lost_name}' went away: {e}");
-                    let _ = lost.send(Cmd::DeviceLost { generation });
+                    let _ = lost.send(generation);
                 }
                 // The host already rerouted us; the stream stays valid.
                 ErrorKind::DeviceChanged => tracing::info!("audio route changed: {e}"),
@@ -359,7 +383,29 @@ impl Lerp {
 
 #[cfg(test)]
 mod tests {
-    use super::Lerp;
+    use super::{capture_thread, Cmd, Lerp};
+    use crossbeam_channel::unbounded;
+
+    /// The thread must end when its `CaptureService` goes away. It once kept a
+    /// `Cmd` sender of its own so device-loss reports could loop back, which
+    /// meant `cmd_rx` never disconnected and every capture thread ever spawned
+    /// stayed alive — one leaked per microphone probe.
+    #[test]
+    fn the_thread_ends_when_its_service_is_dropped() {
+        let (cmd_tx, cmd_rx) = unbounded::<Cmd>();
+        let thread = std::thread::spawn(move || capture_thread(cmd_rx));
+        drop(cmd_tx);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !thread.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "capture thread outlived its service"
+            );
+            std::thread::yield_now();
+        }
+        thread.join().unwrap();
+    }
 
     #[test]
     fn halving_the_rate_halves_the_sample_count() {
