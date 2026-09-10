@@ -1,3 +1,10 @@
+## [2.8.6](https://github.com/Jonathan-Asher/speakly/compare/v2.8.5...v2.8.6) (2026-09-10)
+
+
+### Bug Fixes
+
+* stop publishing a release before its assets exist ([546dde6](https://github.com/Jonathan-Asher/speakly/commit/546dde6c93dd88b7be682507c7702e1d565cc0d7))
+
 ## [2.8.5](https://github.com/Jonathan-Asher/speakly/compare/v2.8.4...v2.8.5) (2026-09-10)
 
 

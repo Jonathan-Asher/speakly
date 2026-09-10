@@ -4566,7 +4566,7 @@ dependencies = [
 
 [[package]]
 name = "speakly"
-version = "2.8.5"
+version = "2.8.6"
 dependencies = [
  "arboard",
  "base64 0.23.1",
@@ -4600,7 +4600,7 @@ dependencies = [
 
 [[package]]
 name = "speakly-engine"
-version = "2.8.5"
+version = "2.8.6"
 dependencies = [
  "cpal",
  "crossbeam-channel",
@@ -4620,7 +4620,7 @@ dependencies = [
 
 [[package]]
 name = "speakly-engine-types"
-version = "2.8.5"
+version = "2.8.6"
 dependencies = [
  "serde",
 ]
