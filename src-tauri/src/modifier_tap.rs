@@ -292,6 +292,9 @@ fn run_tap(
     // so a side-specific combination works even with no bare profile bound.
     let held: Arc<Mutex<HashSet<u16>>> = Arc::new(Mutex::new(HashSet::new()));
     let cb_held = Arc::clone(&held);
+    // Tracks an Esc whose key-down we swallowed, so its key-up goes too.
+    let esc_swallowed = Arc::new(AtomicBool::new(false));
+    let cb_esc_swallowed = Arc::clone(&esc_swallowed);
     let disabled = Arc::new(AtomicBool::new(false));
     let cb_disabled = Arc::clone(&disabled);
     let active: Arc<Mutex<Option<ActivePress>>> = Arc::new(Mutex::new(None));
@@ -377,13 +380,18 @@ fn run_tap(
                     let code =
                         event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
                     if code == KEYCODE_ESCAPE {
-                        // Passed through: the focused app still gets its Esc,
-                        // we just also drop the recording.
                         if cb_engine.dictation.is_active() {
                             tracing::info!("escape (tap) — cancelling dictation");
                             *cb_active.lock().unwrap() = None;
                             crate::input::escape(&cb_app);
+                            // Swallow it: this keypress cancelled a dictation,
+                            // and letting it through fires whatever else claims
+                            // the chord — with the dictation modifier still
+                            // held, ⌥Esc is macOS's "Speak selection".
+                            cb_esc_swallowed.store(true, Ordering::Relaxed);
+                            return CallbackResult::Drop;
                         }
+                        // Not recording: Esc belongs to the focused app.
                         return CallbackResult::Keep;
                     }
                     // A side-specific combination (RightOption+Space): matched on
@@ -453,6 +461,9 @@ fn run_tap(
                 CGEventType::KeyUp => {
                     let code =
                         event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
+                    if code == KEYCODE_ESCAPE && cb_esc_swallowed.swap(false, Ordering::Relaxed) {
+                        return CallbackResult::Drop;
+                    }
                     let ended = {
                         let mut slot = cb_active.lock().unwrap();
                         match slot.as_mut() {

@@ -22,9 +22,13 @@ if [ -f "$SIGNING_KEYCHAIN" ]; then
   security list-keychains -d user | tr -d '"' | grep -qF "$SIGNING_KEYCHAIN" ||
     security list-keychains -d user -s "$SIGNING_KEYCHAIN" $(security list-keychains -d user | tr -d '"')
 else
-  echo "warning: $SIGNING_KEYCHAIN missing — falling back to ad-hoc signing," >&2
-  echo "         which resets Accessibility/Microphone/Keychain on every build." >&2
-  IDENTITY=""
+  # Refuse rather than fall back. An ad-hoc build silently resets
+  # Accessibility, Microphone and Keychain grants, and re-granting them by hand
+  # after every update is exactly what this keychain exists to prevent.
+  echo "error: $SIGNING_KEYCHAIN is missing, so this build could only be signed" >&2
+  echo "       ad-hoc — which would reset Accessibility, Microphone and Keychain" >&2
+  echo "       permissions again. Restore the signing identity before building." >&2
+  exit 1
 fi
 
 # createUpdaterArtifacts signs the update archive with the updater key.
