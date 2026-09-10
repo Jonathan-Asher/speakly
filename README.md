@@ -17,7 +17,7 @@ pnpm install
 pnpm tauri dev
 ```
 
-The Rust engine lives in `src-tauri/crates/engine`; the app shell in `src-tauri/src`; the React UI in `src/`. Engine benches: `docs/SPIKES.md`.
+The Rust engine lives in `src-tauri/crates/engine`; the app shell in `src-tauri/src`; the React UI in `src/`. Engine benches: `docs/SPIKES.md`. Chasing a report of a cut-off dictation, a missing recording pill or the wrong microphone: `docs/DIAGNOSTICS.md`.
 
 ## License
 
