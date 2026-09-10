@@ -1,3 +1,10 @@
+## [2.8.5](https://github.com/Jonathan-Asher/speakly/compare/v2.8.4...v2.8.5) (2026-09-10)
+
+
+### Bug Fixes
+
+* actually relaunch after an update, and copy either version from history ([22a2fed](https://github.com/Jonathan-Asher/speakly/commit/22a2fed24fd65975c260b54d9bd08112f5efdaf5))
+
 ## [2.8.4](https://github.com/Jonathan-Asher/speakly/compare/v2.8.3...v2.8.4) (2026-09-10)
 
 
