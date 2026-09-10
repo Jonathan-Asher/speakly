@@ -794,6 +794,24 @@ pub fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// Quit and come straight back up — used to finish an update.
+///
+/// This exists instead of `tauri_plugin_process::relaunch` because that one
+/// cannot work here: it asks Tauri to exit and relies on Tauri re-spawning
+/// the binary after the `RunEvent::Exit` callback returns, and ours never
+/// returns (it `_exit`s to skip ggml's Metal destructors). Flagging the
+/// restart and letting that handler do the spawn is what makes it stick.
+///
+/// The binary is resolved here rather than in the exit handler so a failure
+/// is reported to the caller while the app is still alive to show it.
+#[tauri::command]
+pub fn restart_app(app: AppHandle) -> Result<(), String> {
+    std::env::current_exe().map_err(|e| format!("cannot locate the app to restart: {e}"))?;
+    crate::RESTART_ON_EXIT.store(true, std::sync::atomic::Ordering::Relaxed);
+    app.exit(0);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn meeting_stop(engine: State<'_, Arc<Engine>>, session_id: u64) -> Result<(), String> {
     engine.meetings.stop(session_id)

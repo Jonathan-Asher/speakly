@@ -47,6 +47,42 @@ function mmss(ms: number) {
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+/** Copy-to-clipboard control that confirms the copy happened — without it,
+ * two adjacent copy buttons give no sign of which one you pressed. */
+function CopyButton({
+  label,
+  title,
+  text,
+}: {
+  label: string;
+  title: string;
+  text: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  return (
+    <button
+      title={title}
+      onClick={() => {
+        void navigator.clipboard.writeText(text);
+        setCopied(true);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(false), 1200);
+      }}
+      className={`rounded px-1.5 py-0.5 text-[11px] transition-colors ${
+        copied
+          ? "text-emerald-600 dark:text-emerald-400"
+          : "hover:bg-neutral-100 dark:hover:bg-neutral-800"
+      }`}
+    >
+      {copied ? "Copied" : label}
+    </button>
+  );
+}
+
 /** Timestamped, speaker-labeled detail for stored file/meeting transcripts. */
 function SegmentDetail({ item }: { item: HistoryItem }) {
   const [segments, setSegments] = useState<StoredSegment[] | null>(null);
@@ -99,6 +135,14 @@ function SegmentDetail({ item }: { item: HistoryItem }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-0.5 text-[11px] uppercase tracking-wide text-neutral-400">
+      {children}
     </div>
   );
 }
@@ -234,17 +278,26 @@ export function HistoryView() {
                 <span className="rounded bg-neutral-100 px-1.5 py-0.5 dark:bg-neutral-800">
                   {item.kind}
                 </span>
-                <span className="ms-auto flex items-center gap-2">
-                  <button
-                    onClick={() => void navigator.clipboard.writeText(item.text)}
-                    className="opacity-0 transition-opacity group-hover:opacity-100"
-                    title="Copy"
-                  >
-                    ⧉
-                  </button>
+                <span className="ms-auto flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                  {item.translatedText ? (
+                    <>
+                      <CopyButton
+                        label="Original"
+                        title="Copy what was dictated, before cleanup"
+                        text={item.text}
+                      />
+                      <CopyButton
+                        label="Improved"
+                        title="Copy the cleaned-up text, as it was pasted"
+                        text={item.translatedText}
+                      />
+                    </>
+                  ) : (
+                    <CopyButton label="Copy" title="Copy" text={item.text} />
+                  )}
                   <button
                     onClick={() => void onDelete(item.id)}
-                    className="opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+                    className="rounded px-1 py-0.5 hover:text-red-500"
                     title="Delete"
                   >
                     ✕
@@ -252,6 +305,7 @@ export function HistoryView() {
                 </span>
               </div>
               <button className="block w-full text-start" onClick={() => toggle(item.id)}>
+                {item.translatedText && isOpen && <Label>Original</Label>}
                 <DirectionalText
                   className={`selectable text-sm leading-relaxed ${isOpen ? "" : "line-clamp-2"}`}
                 >
@@ -259,9 +313,12 @@ export function HistoryView() {
                 </DirectionalText>
               </button>
               {item.translatedText && isOpen && (
-                <DirectionalText className="selectable mt-2 border-t border-neutral-200 pt-2 text-sm text-neutral-500 dark:border-neutral-800">
-                  {item.translatedText}
-                </DirectionalText>
+                <div className="mt-2 border-t border-neutral-200 pt-2 dark:border-neutral-800">
+                  <Label>Improved</Label>
+                  <DirectionalText className="selectable text-sm text-neutral-500">
+                    {item.translatedText}
+                  </DirectionalText>
+                </div>
               )}
               {hasSegments && isOpen && <SegmentDetail item={item} />}
             </li>

@@ -17,6 +17,7 @@ mod sound;
 mod translation;
 mod tray;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use speakly_engine::Engine;
@@ -24,6 +25,11 @@ use tauri::{Emitter, Manager, WindowEvent};
 
 use crate::settings::SettingsState;
 use crate::sink::AppSink;
+
+/// Set by [`commands::restart_app`] so the exit handler re-execs us instead of
+/// simply dying. See the `RunEvent::Exit` arm for why this cannot be left to
+/// `tauri_plugin_process`.
+pub static RESTART_ON_EXIT: AtomicBool = AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -79,6 +85,7 @@ pub fn run() {
             commands::delete_profile,
             commands::show_main_window,
             commands::quit_app,
+            commands::restart_app,
             commands::set_hotkey_capture,
             commands::list_audio_devices,
             commands::queue_file_jobs,
@@ -228,8 +235,25 @@ pub fn run() {
                 }
             }
             if let tauri::RunEvent::Exit = event {
-                // ggml's Metal device asserts inside C++ static destructors at
-                // exit; skip them — the OS reclaims everything anyway.
+                // Relaunch here, by hand, rather than through
+                // `tauri_plugin_process::relaunch`. That sets a flag and asks
+                // Tauri to exit, and Tauri re-spawns the binary *after* this
+                // callback returns — but this callback never returns: ggml's
+                // Metal device asserts inside C++ static destructors at exit,
+                // so we skip them with `_exit`. Spawning first is what makes
+                // "Restart to finish" actually come back up.
+                if RESTART_ON_EXIT.load(Ordering::Relaxed) {
+                    match std::env::current_exe() {
+                        // The updater replaced the bundle in place, so this
+                        // path now points at the new binary.
+                        Ok(exe) => match std::process::Command::new(&exe).spawn() {
+                            Ok(_) => tracing::info!("relaunching {}", exe.display()),
+                            Err(e) => tracing::error!("relaunch failed: {e}"),
+                        },
+                        Err(e) => tracing::error!("cannot locate our own binary: {e}"),
+                    }
+                }
+                // The OS reclaims everything anyway.
                 unsafe { libc::_exit(0) };
             }
         });

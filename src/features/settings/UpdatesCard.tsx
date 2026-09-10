@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
 
 type UpdateState =
   | { kind: "idle" }
@@ -11,12 +10,21 @@ type UpdateState =
   | { kind: "none" }
   | { kind: "available"; update: Update }
   | { kind: "downloading"; pct: number | null }
+  | { kind: "restarting" }
   | { kind: "ready" }
   | { kind: "error"; message: string };
 
-/** App updates: manual check, download with progress, relaunch. Auto-check on
- * launch is a setting; a found update surfaces via the update://available
- * event even when this card isn't mounted yet. */
+/// Quit and relaunch into the version just installed. Deliberately not
+/// `relaunch()` from the process plugin — see the `restart_app` command for
+/// why that one can never come back up in this app.
+const restart = () => invoke("restart_app");
+
+/** App updates: manual check, download with progress, then relaunch on its
+ * own — an installed update that leaves you on the old version until you
+ * notice a button is just a slower manual update. The button stays as the
+ * fallback for when the automatic restart cannot start. Auto-check on launch
+ * is a setting; a found update surfaces via the update://available event even
+ * when this card isn't mounted yet. */
 export function UpdatesCard() {
   const [version, setVersion] = useState("");
   const [autoCheck, setAutoCheck] = useState(true);
@@ -49,6 +57,7 @@ export function UpdatesCard() {
     setState({ kind: "downloading", pct: null });
     let total: number | null = null;
     let got = 0;
+    let installed = false;
     try {
       await update.downloadAndInstall((ev) => {
         if (ev.event === "Started") {
@@ -60,12 +69,17 @@ export function UpdatesCard() {
             pct: total ? Math.round((got / total) * 100) : null,
           });
         } else if (ev.event === "Finished") {
-          setState({ kind: "ready" });
+          installed = true;
+          setState({ kind: "restarting" });
         }
       });
-      setState({ kind: "ready" });
+      setState({ kind: "restarting" });
+      await restart();
     } catch (e) {
-      setState({ kind: "error", message: String(e) });
+      // Either the download failed, or the restart did. Once the bundle is
+      // swapped the app is stale but usable, so offer the button rather than
+      // leaving a dead end.
+      setState(installed ? { kind: "ready" } : { kind: "error", message: String(e) });
     }
   };
 
@@ -88,10 +102,12 @@ export function UpdatesCard() {
           >
             Install {state.update.version}
           </button>
+        ) : state.kind === "restarting" ? (
+          <span className="text-sm text-neutral-500">Restarting…</span>
         ) : state.kind === "ready" ? (
           <button
             className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
-            onClick={() => void relaunch()}
+            onClick={() => void restart()}
           >
             Restart to finish
           </button>
