@@ -1,3 +1,10 @@
+## [2.8.7](https://github.com/Jonathan-Asher/speakly/compare/v2.8.6...v2.8.7) (2026-09-11)
+
+
+### Bug Fixes
+
+* don't let a slow microphone turn hold-to-talk into a toggle ([849d94e](https://github.com/Jonathan-Asher/speakly/commit/849d94e59e5c68aceaf048581d0e3c71f021168d))
+
 ## [2.8.6](https://github.com/Jonathan-Asher/speakly/compare/v2.8.5...v2.8.6) (2026-09-10)
 
 
