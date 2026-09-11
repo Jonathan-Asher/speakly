@@ -58,11 +58,44 @@ struct Active {
     ticker: Option<JoinHandle<()>>,
 }
 
+/// What arrived while a session's microphone was still opening, to be applied
+/// the moment it goes live. Opening can take seconds — an iPhone reached over
+/// Continuity is the worst case — and a key release, a growing combination or
+/// an Esc can all land inside that window.
+#[derive(Default)]
+struct Pending {
+    retarget: Option<DictationSpec>,
+    end: Option<End>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum End {
+    Stop,
+    Cancel,
+}
+
+impl Pending {
+    /// Cancel outranks a stop already recorded: Esc means discard the
+    /// recording, whatever the key release asked for a moment earlier.
+    fn record_end(&mut self, end: End) {
+        if self.end.is_none() || end == End::Cancel {
+            self.end = Some(end);
+        }
+    }
+}
+
 pub struct DictationEngine {
     capture: CaptureService,
     stt: SttService,
     sink: Arc<dyn EventSink>,
     active: Mutex<Option<Active>>,
+    /// Profile of a session whose microphone is still opening. `active` is
+    /// still `None` then, but a session is on its way and every caller must
+    /// treat it as one.
+    ///
+    /// Lock order is `active` → `starting` → `pending`; never the reverse.
+    starting: Mutex<Option<String>>,
+    pending: Mutex<Pending>,
 }
 
 impl DictationEngine {
@@ -72,20 +105,26 @@ impl DictationEngine {
             stt,
             sink,
             active: Mutex::new(None),
+            starting: Mutex::new(None),
+            pending: Mutex::new(Pending::default()),
         }
     }
 
     pub fn is_active(&self) -> bool {
-        self.active.lock().unwrap().is_some()
+        self.active.lock().unwrap().is_some() || self.starting.lock().unwrap().is_some()
     }
 
-    /// Profile of the running session, if any.
+    /// Profile of the running session, or of one whose microphone is still
+    /// opening — a session being born counts, or the key release that ends it
+    /// would be dropped for having nothing to stop.
     pub fn active_profile_id(&self) -> Option<String> {
-        self.active
+        let live = self
+            .active
             .lock()
             .unwrap()
             .as_ref()
-            .map(|a| a.spec.lock().unwrap().profile_id.clone())
+            .map(|a| a.spec.lock().unwrap().profile_id.clone());
+        live.or_else(|| self.starting.lock().unwrap().clone())
     }
 
     /// Swap the running session's profile in place — the combination evolved
@@ -95,6 +134,13 @@ impl DictationEngine {
     pub fn retarget(&self, spec: DictationSpec) -> bool {
         let active = self.active.lock().unwrap();
         let Some(active) = active.as_ref() else {
+            drop(active);
+            // The combination grew while the microphone was still opening;
+            // the starter applies this as soon as there is a session.
+            if self.starting.lock().unwrap().is_some() {
+                self.pending.lock().unwrap().retarget = Some(spec);
+                return true;
+            }
             return false;
         };
         let profile_id = spec.profile_id.clone();
@@ -119,15 +165,28 @@ impl DictationEngine {
     }
 
     pub fn start(&self, spec: DictationSpec) {
-        let mut active = self.active.lock().unwrap();
-        if active.is_some() {
-            return;
+        // Claim the slot, then let go of every lock before touching the
+        // microphone. Opening one blocks for as long as the device takes —
+        // seconds, for an iPhone over Continuity — and holding `active`
+        // across that stalls is_active/stop/cancel/retarget with it. Those
+        // are called straight from the event-tap callback, and macOS disables
+        // a tap that stops responding, so the key release never arrives and
+        // the recording runs on as if it were a toggle.
+        {
+            let active = self.active.lock().unwrap();
+            let mut starting = self.starting.lock().unwrap();
+            if active.is_some() || starting.is_some() {
+                return;
+            }
+            *starting = Some(spec.profile_id.clone());
+            *self.pending.lock().unwrap() = Pending::default();
         }
 
         let (tx, rx) = unbounded::<Vec<f32>>();
         let sample_rate = match self.capture.start(tx, spec.mic_priority.clone()) {
             Ok(rate) => rate,
             Err(e) => {
+                *self.starting.lock().unwrap() = None;
                 let message = if e.contains("no input device") {
                     "No microphone found — connect one and try again".to_string()
                 } else {
@@ -184,7 +243,8 @@ impl DictationEngine {
             phase: Phase::Listening,
             profile_id: spec.lock().unwrap().profile_id.clone(),
         });
-        *active = Some(Active {
+        // Re-acquire only now that the device is open and everything is built.
+        *self.active.lock().unwrap() = Some(Active {
             spec,
             buffer,
             sample_rate,
@@ -193,12 +253,26 @@ impl DictationEngine {
             shared,
             ticker: Some(ticker),
         });
+        *self.starting.lock().unwrap() = None;
+
+        // Honour whatever landed while the microphone was opening, in the
+        // order it would have taken effect.
+        let pending = std::mem::take(&mut *self.pending.lock().unwrap());
+        if let Some(spec) = pending.retarget {
+            self.retarget(spec);
+        }
+        match pending.end {
+            Some(End::Stop) => self.stop(),
+            Some(End::Cancel) => self.cancel(),
+            None => {}
+        }
     }
 
     /// Key-up: stop capture and transcribe on a worker thread. Emits
     /// `TranscriptReady` (or a warning + `Idle`) when done.
     pub fn stop(&self) {
         let Some(active) = self.active.lock().unwrap().take() else {
+            self.defer_end(End::Stop);
             return;
         };
         self.capture.stop();
@@ -214,6 +288,7 @@ impl DictationEngine {
 
     pub fn cancel(&self) {
         let Some(active) = self.active.lock().unwrap().take() else {
+            self.defer_end(End::Cancel);
             return;
         };
         self.capture.stop();
@@ -223,6 +298,16 @@ impl DictationEngine {
             profile_id: active.spec.lock().unwrap().profile_id.clone(),
         });
         // The ticker holds only Arcs; it exits on its own after the signal.
+    }
+
+    /// Record an end requested before the session went live, so the starter
+    /// can apply it. A no-op when nothing is starting either — then there was
+    /// genuinely nothing to end.
+    fn defer_end(&self, end: End) {
+        if self.starting.lock().unwrap().is_none() {
+            return;
+        }
+        self.pending.lock().unwrap().record_end(end);
     }
 }
 
@@ -503,5 +588,43 @@ fn finalize(mut active: Active, stt: SttService, sink: Arc<dyn EventSink>) {
                 profile_id: spec.profile_id,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{End, Pending};
+
+    /// A key release during a slow microphone open records a stop, so the
+    /// starter can apply it the moment there is a session to apply it to.
+    /// Without this the release is dropped and the recording runs on until
+    /// the next press, which is what made an iPhone over Continuity behave
+    /// as though hold-to-talk were a toggle.
+    #[test]
+    fn a_release_during_the_open_is_remembered() {
+        let mut pending = Pending::default();
+        assert_eq!(pending.end, None);
+        pending.record_end(End::Stop);
+        assert_eq!(pending.end, Some(End::Stop));
+    }
+
+    #[test]
+    fn escape_outranks_a_release_already_recorded() {
+        let mut pending = Pending::default();
+        pending.record_end(End::Stop);
+        pending.record_end(End::Cancel);
+        assert_eq!(
+            pending.end,
+            Some(End::Cancel),
+            "Esc must discard, not paste"
+        );
+    }
+
+    #[test]
+    fn a_release_does_not_downgrade_an_escape() {
+        let mut pending = Pending::default();
+        pending.record_end(End::Cancel);
+        pending.record_end(End::Stop);
+        assert_eq!(pending.end, Some(End::Cancel));
     }
 }

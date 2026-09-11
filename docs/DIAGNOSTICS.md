@@ -70,6 +70,26 @@ entry wins; if none are connected, the OS default is used.
 | `audio route changed` | the host rerouted us itself; no action needed |
 | `microphone '<name>' keeps dropping out — giving up after 3 switches` | failover is capped, to stop a flapping device spinning the capture thread |
 
+### A slow microphone
+
+`event tap was disabled by the system — restarting it` right after a
+`recording from ...` line means opening that device blocked the event-tap
+callback long enough for macOS to kill the tap. An iPhone reached over
+Continuity takes 3–6 seconds. While the tap is dead the key release is never
+delivered, so hold-to-talk keeps recording until the next press and looks like
+it has turned into a toggle.
+
+Two things keep this from happening: the dictation start runs on its own
+thread instead of the tap callback, and `DictationEngine::start` no longer
+holds the `active` lock across the device open — everything else that reads it
+(`is_active`, `stop`, `cancel`, `retarget`) is called from that same callback
+and would queue behind it. A release, a grown combination or an Esc that lands
+during the open is recorded and applied the moment the session goes live.
+
+If a recording made this way comes back empty, the key really was released
+before the microphone finished opening; there is no audio from before the
+device was ready.
+
 The sample rate is fixed when capture starts and never changes mid-utterance —
 a replacement device is either opened at that rate or converted to it, because
 changing rates halfway would make everything after the switch play back at the

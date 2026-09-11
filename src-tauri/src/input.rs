@@ -65,6 +65,25 @@ fn schedule_stop(app: &AppHandle) {
     });
 }
 
+/// Begin a dictation without blocking the caller.
+///
+/// Opening a microphone blocks until the device is ready — seconds, for an
+/// iPhone reached over Continuity. Callers here are event-tap callbacks, and
+/// macOS disables a tap whose callback stops responding: the key release is
+/// then never delivered, the recording runs on, and the next press looks like
+/// it toggled it off. So the open always happens on its own thread.
+fn start_async(app: &AppHandle, profile_id: &str) {
+    let app = app.clone();
+    let profile_id = profile_id.to_string();
+    std::thread::Builder::new()
+        .name("speakly-start".into())
+        .spawn(move || {
+            let engine = engine(&app);
+            crate::shortcuts::start_profile(&app, &engine, &profile_id);
+        })
+        .expect("spawn dictation start");
+}
+
 /// Mode of a profile, read fresh from settings.
 fn mode_of(app: &AppHandle, profile_id: &str) -> DictationMode {
     let state = app.state::<crate::settings::SettingsState>();
@@ -83,7 +102,7 @@ pub fn pressed(app: &AppHandle, profile_id: &str) {
     cancel_deferred_stop(app);
     let engine = engine(app);
     match engine.dictation.active_profile_id() {
-        None => crate::shortcuts::start_profile(app, &engine, profile_id),
+        None => start_async(app, profile_id),
         Some(current) if current == profile_id => {
             // Second press of the running profile: toggle stops (on the tap's
             // clean release for bare keys, immediately for combos — the caller
@@ -112,7 +131,7 @@ pub fn pressed_defer_toggle_stop(app: &AppHandle, profile_id: &str) -> bool {
     let engine = engine(app);
     match engine.dictation.active_profile_id() {
         None => {
-            crate::shortcuts::start_profile(app, &engine, profile_id);
+            start_async(app, profile_id);
             false
         }
         Some(current) if current == profile_id => mode_of(app, profile_id) == DictationMode::Toggle,
