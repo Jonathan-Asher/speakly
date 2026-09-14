@@ -1,3 +1,10 @@
+## [2.8.10](https://github.com/Jonathan-Asher/speakly/compare/v2.8.9...v2.8.10) (2026-09-14)
+
+
+### Bug Fixes
+
+* log what AppKit makes of the pill's window on every show ([0f9f649](https://github.com/Jonathan-Asher/speakly/commit/0f9f6492be62e990221485606aa8e757241fe74d))
+
 ## [2.8.9](https://github.com/Jonathan-Asher/speakly/compare/v2.8.8...v2.8.9) (2026-09-14)
 
 
