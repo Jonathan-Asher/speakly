@@ -138,11 +138,26 @@ so: `ignored a stale idle signal — a dictation is running`.
 If the pill is invisible again, these three lines tell the whole story in one
 pass, without another round trip:
 
+Each show writes two lines — where it went, and what AppKit makes of the
+window afterwards:
+
+```
+pill → screen 0,0 1920x1080, placed at 720,96 (cursor 856,500)
+pill state: visible=true occluded=false alpha=1.00 app-active=Some(false)
+```
+
 | What the log shows | What it means |
 |---|---|
 | no `pill → screen` line at all | `show` was never called — the dictation never reached the listening phase |
-| `pill → screen` but `the recording pill was shown but AppKit reports it off screen` | it was shown and something ordered it out again |
-| `pill → screen` and no warning | it is genuinely on screen; check the coordinates against the display you were looking at |
+| `visible=false` | the window was not ordered in |
+| `occluded=true` | AppKit does not consider the content visible, and WebKit is then free to stop drawing it: the window is placed and ordered in, but the pill never paints |
+| `alpha=0.00` | the window is transparent |
+| all three fine | it is genuinely on screen — compare the coordinates against the display you were looking at |
+
+`app-active` is only context. A background app can show a window perfectly
+well: ordering was tested directly against AppKit with an accessory-policy,
+non-activating, floating window over repeated hide/show cycles, and it stays
+visible throughout. Ordering has been ruled out as a cause.
 
 ## Permissions
 

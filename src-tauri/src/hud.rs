@@ -98,26 +98,70 @@ pub fn show(app: &AppHandle) {
     // ordered in.
     place(app, &window);
 
-    // Ask AppKit, not Tauri, whether it really landed. "I can't see the pill"
-    // has had two very different causes — placed off every screen, and hidden
-    // again by a stale idle signal — and one line here separates them without
-    // another round trip.
+    // One line per dictation saying what AppKit thinks of the window it was
+    // just asked to show. "I can't see the pill" has had several unrelated
+    // causes and the log could not tell them apart; these three values do.
+    //
+    // `occluded` is the important one: when AppKit considers a window's
+    // content not visible, WebKit stops rendering it, so the window can be
+    // perfectly placed and ordered in while the pill itself never paints.
     #[cfg(target_os = "macos")]
-    if on_screen(&window) == Some(false) {
-        tracing::warn!("the recording pill was shown but AppKit reports it off screen");
+    if let Some(state) = window_state(&window) {
+        tracing::info!(
+            "pill state: visible={} occluded={} alpha={:.2} app-active={:?}",
+            state.visible,
+            !state.content_visible,
+            state.alpha,
+            app_is_active()
+        );
     }
 }
 
-/// Whether the pill's window is actually on screen, as AppKit sees it.
 #[cfg(target_os = "macos")]
-fn on_screen(window: &tauri::WebviewWindow) -> Option<bool> {
+struct WindowState {
+    /// Ordered in — the window is in the screen list.
+    visible: bool,
+    /// AppKit considers the content actually visible. False means WebKit is
+    /// free to stop drawing it.
+    content_visible: bool,
+    alpha: f64,
+}
+
+#[cfg(target_os = "macos")]
+fn window_state(window: &tauri::WebviewWindow) -> Option<WindowState> {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
     let ptr = window.ns_window().ok()?;
     unsafe {
-        let visible: bool = msg_send![&*(ptr as *mut AnyObject), isVisible];
-        Some(visible)
+        let ns = &*(ptr as *mut AnyObject);
+        let visible: bool = msg_send![ns, isVisible];
+        let occlusion: usize = msg_send![ns, occlusionState];
+        let alpha: f64 = msg_send![ns, alphaValue];
+        // NSWindowOcclusionStateVisible
+        const VISIBLE: usize = 1 << 1;
+        Some(WindowState {
+            visible,
+            content_visible: occlusion & VISIBLE != 0,
+            alpha,
+        })
+    }
+}
+
+/// Whether Speakly is the frontmost application — the thing that decides
+/// whether an `orderFront:` would have been honoured.
+#[cfg(target_os = "macos")]
+fn app_is_active() -> Option<bool> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    unsafe {
+        let app: *mut AnyObject = msg_send![objc2::class!(NSApplication), sharedApplication];
+        if app.is_null() {
+            return None;
+        }
+        let active: bool = msg_send![&*app, isActive];
+        Some(active)
     }
 }
 
