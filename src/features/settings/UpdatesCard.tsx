@@ -28,13 +28,17 @@ const restart = () => invoke("restart_app");
 export function UpdatesCard() {
   const [version, setVersion] = useState("");
   const [autoCheck, setAutoCheck] = useState(true);
+  const [autoInstall, setAutoInstall] = useState(true);
   const [state, setState] = useState<UpdateState>({ kind: "idle" });
 
   useEffect(() => {
     void getVersion().then(setVersion);
-    void invoke<{ autoCheckUpdates: boolean }>("engine_info").then((i) =>
-      setAutoCheck(i.autoCheckUpdates),
-    );
+    void invoke<{ autoCheckUpdates: boolean; autoInstallUpdates: boolean }>(
+      "engine_info",
+    ).then((i) => {
+      setAutoCheck(i.autoCheckUpdates);
+      setAutoInstall(i.autoInstallUpdates);
+    });
     const un = listen<{ version: string }>("update://available", () => {
       setState((s) => (s.kind === "idle" ? { kind: "checking" } : s));
       void doCheck();
@@ -86,6 +90,11 @@ export function UpdatesCard() {
   const toggleAuto = (enabled: boolean) => {
     setAutoCheck(enabled);
     void invoke("set_update_auto_check", { enabled });
+  };
+
+  const toggleAutoInstall = (enabled: boolean) => {
+    setAutoInstall(enabled);
+    void invoke("set_update_auto_install", { enabled });
   };
 
   return (
@@ -150,6 +159,18 @@ export function UpdatesCard() {
           className="accent-accent"
         />
         Check for updates automatically at launch
+      </label>
+      <label className="mt-1.5 flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={autoInstall}
+          disabled={!autoCheck}
+          onChange={(e) => toggleAutoInstall(e.target.checked)}
+          className="accent-accent disabled:opacity-40"
+        />
+        <span className={autoCheck ? "" : "opacity-40"}>
+          Install them too, and restart once you stop dictating
+        </span>
       </label>
     </div>
   );

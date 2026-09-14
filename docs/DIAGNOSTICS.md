@@ -193,6 +193,13 @@ minisign key whose public half is in `tauri.conf.json`; only the release
 workflow holds the private half, so a locally built `.tar.gz` will not install
 as an update (and the local build prints a key-mismatch warning saying so).
 
+A found update installs itself unless that is switched off in Settings →
+Updates. The sequence in the log is `update available: <v>` → `installed
+update <v>` → `relaunching into <v>`. The relaunch waits for 20 seconds with
+no dictation running, so it cannot land mid-sentence; if that quiet moment
+never comes it logs `it will start on the next launch` and gives up, which is
+harmless because installing has already replaced the bundle on disk.
+
 Installing writes `relaunching <path>` and the app comes back on its own. It
 does not use `tauri_plugin_process::relaunch`, which cannot work here: that
 asks Tauri to exit and relies on Tauri re-spawning the binary *after* the

@@ -448,6 +448,7 @@ pub fn engine_info(app: AppHandle, state: State<'_, SettingsState>) -> Value {
         "version": app.package_info().version.to_string(),
         "backend": "whisper.cpp · Metal",
         "autoCheckUpdates": settings.updates.auto_check,
+        "autoInstallUpdates": settings.updates.auto_install,
         "models": models,
         "logDir": crate::logs::log_dir().to_string_lossy(),
     })
@@ -609,6 +610,18 @@ pub fn set_update_auto_check(
 ) -> Result<(), String> {
     let mut settings = state.0.lock().unwrap();
     settings.updates.auto_check = enabled;
+    crate::settings::save(&app, &settings);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_update_auto_install(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut settings = state.0.lock().unwrap();
+    settings.updates.auto_install = enabled;
     crate::settings::save(&app, &settings);
     Ok(())
 }

@@ -31,6 +31,65 @@ use crate::sink::AppSink;
 /// `tauri_plugin_process`.
 pub static RESTART_ON_EXIT: AtomicBool = AtomicBool::new(false);
 
+/// Download and install an update in the background, then relaunch into it.
+///
+/// An update that waits behind a button is an update that does not happen —
+/// the button only gets seen by someone who goes to the Settings screen
+/// looking for it. Installing replaces the bundle on disk immediately, so
+/// even if the relaunch below never gets a safe moment, the next launch
+/// starts the new version.
+async fn install_update(
+    app: tauri::AppHandle,
+    update: tauri_plugin_updater::Update,
+    version: String,
+) {
+    match update.download_and_install(|_, _| {}, || {}).await {
+        Ok(()) => {
+            tracing::info!("installed update {version}");
+            relaunch_when_idle(app, version);
+        }
+        Err(e) => tracing::warn!("could not install update {version}: {e}"),
+    }
+}
+
+/// Relaunch once dictation has been quiet for a while.
+///
+/// Restarting takes the hotkeys away for a few seconds while the model warms
+/// up again, so it must never land mid-dictation, and preferably not between
+/// two sentences of the same working burst either. If that moment never comes
+/// this simply gives up: the new version is already on disk and starts next
+/// time.
+fn relaunch_when_idle(app: tauri::AppHandle, version: String) {
+    /// Consecutive quiet checks required — 20 seconds without a dictation.
+    const QUIET_CHECKS: u32 = 40;
+    const INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+    const GIVE_UP_AFTER: std::time::Duration = std::time::Duration::from_secs(1800);
+
+    std::thread::spawn(move || {
+        let engine = Arc::clone(&*app.state::<Arc<Engine>>());
+        let deadline = std::time::Instant::now() + GIVE_UP_AFTER;
+        let mut quiet = 0;
+        while quiet < QUIET_CHECKS {
+            if std::time::Instant::now() > deadline {
+                tracing::info!(
+                    "update {version} is installed but dictation never went quiet — \
+                     it will start on the next launch"
+                );
+                return;
+            }
+            std::thread::sleep(INTERVAL);
+            quiet = if engine.dictation.is_active() {
+                0
+            } else {
+                quiet + 1
+            };
+        }
+        tracing::info!("relaunching into {version}");
+        RESTART_ON_EXIT.store(true, Ordering::Relaxed);
+        app.exit(0);
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     logs::init();
@@ -77,6 +136,7 @@ pub fn run() {
             permissions::open_privacy_pane,
             commands::engine_info,
             commands::set_update_auto_check,
+            commands::set_update_auto_install,
             commands::get_log_path,
             commands::reveal_logs,
             commands::read_log_tail,
@@ -174,6 +234,7 @@ pub fn run() {
 
             // Background update check on launch (silent unless one is found;
             // the UI listens for update://available).
+            let auto_install = loaded.updates.auto_install;
             if loaded.updates.auto_check {
                 let update_handle = handle.clone();
                 tauri::async_runtime::spawn(async move {
@@ -181,11 +242,15 @@ pub fn run() {
                     match update_handle.updater() {
                         Ok(updater) => match updater.check().await {
                             Ok(Some(update)) => {
-                                tracing::info!("update available: {}", update.version);
+                                let version = update.version.clone();
+                                tracing::info!("update available: {version}");
                                 let _ = update_handle.emit(
                                     "update://available",
-                                    serde_json::json!({ "version": update.version }),
+                                    serde_json::json!({ "version": version }),
                                 );
+                                if auto_install {
+                                    install_update(update_handle.clone(), update, version).await;
+                                }
                             }
                             Ok(None) => tracing::debug!("up to date"),
                             Err(e) => tracing::debug!("update check failed: {e}"),

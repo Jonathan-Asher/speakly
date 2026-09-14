@@ -106,11 +106,19 @@ fn d_true() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdatesSettings {
     pub auto_check: bool,
+    /// Install a found update without being asked, and relaunch into it once
+    /// no dictation is running. Off means the Settings screen offers a button
+    /// instead — which is only seen by someone who goes looking for it.
+    #[serde(default = "d_true")]
+    pub auto_install: bool,
 }
 
 impl Default for UpdatesSettings {
     fn default() -> Self {
-        Self { auto_check: true }
+        Self {
+            auto_check: true,
+            auto_install: true,
+        }
     }
 }
 
