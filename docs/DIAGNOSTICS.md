@@ -135,6 +135,15 @@ repeated for every dictation after the first.
 Both signals are now ignored while a dictation is running, and the log says
 so: `ignored a stale idle signal — a dictation is running`.
 
+If the pill is invisible again, these three lines tell the whole story in one
+pass, without another round trip:
+
+| What the log shows | What it means |
+|---|---|
+| no `pill → screen` line at all | `show` was never called — the dictation never reached the listening phase |
+| `pill → screen` but `the recording pill was shown but AppKit reports it off screen` | it was shown and something ordered it out again |
+| `pill → screen` and no warning | it is genuinely on screen; check the coordinates against the display you were looking at |
+
 ## Permissions
 
 | Line | Means |

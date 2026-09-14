@@ -97,6 +97,28 @@ pub fn show(app: &AppHandle) {
     // the frame only settles onto the target display after the window is
     // ordered in.
     place(app, &window);
+
+    // Ask AppKit, not Tauri, whether it really landed. "I can't see the pill"
+    // has had two very different causes — placed off every screen, and hidden
+    // again by a stale idle signal — and one line here separates them without
+    // another round trip.
+    #[cfg(target_os = "macos")]
+    if on_screen(&window) == Some(false) {
+        tracing::warn!("the recording pill was shown but AppKit reports it off screen");
+    }
+}
+
+/// Whether the pill's window is actually on screen, as AppKit sees it.
+#[cfg(target_os = "macos")]
+fn on_screen(window: &tauri::WebviewWindow) -> Option<bool> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let ptr = window.ns_window().ok()?;
+    unsafe {
+        let visible: bool = msg_send![&*(ptr as *mut AnyObject), isVisible];
+        Some(visible)
+    }
 }
 
 /// Put the pill bottom-center of the display under the pointer, preferring the
