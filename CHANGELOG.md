@@ -1,3 +1,10 @@
+## [2.8.9](https://github.com/Jonathan-Asher/speakly/compare/v2.8.8...v2.8.9) (2026-09-14)
+
+
+### Bug Fixes
+
+* say in the log whether the pill actually landed on screen ([c3af9ed](https://github.com/Jonathan-Asher/speakly/commit/c3af9ed60a24c5b012ff7f3a4bd1d95cb7cbb9de))
+
 ## [2.8.8](https://github.com/Jonathan-Asher/speakly/compare/v2.8.7...v2.8.8) (2026-09-14)
 
 
