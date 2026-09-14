@@ -1,3 +1,10 @@
+# [2.9.0](https://github.com/Jonathan-Asher/speakly/compare/v2.8.10...v2.9.0) (2026-09-14)
+
+
+### Features
+
+* install updates without being asked ([6e8717c](https://github.com/Jonathan-Asher/speakly/commit/6e8717ce860d1ea1cc93d318a36538892e423957))
+
 ## [2.8.10](https://github.com/Jonathan-Asher/speakly/compare/v2.8.9...v2.8.10) (2026-09-14)
 
 
