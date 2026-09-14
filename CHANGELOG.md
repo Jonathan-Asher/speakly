@@ -1,3 +1,10 @@
+## [2.8.8](https://github.com/Jonathan-Asher/speakly/compare/v2.8.7...v2.8.8) (2026-09-14)
+
+
+### Bug Fixes
+
+* stop a finished dictation hiding the next one's pill ([c4877c2](https://github.com/Jonathan-Asher/speakly/commit/c4877c295a83122980858fae7840413986b426c7))
+
 ## [2.8.7](https://github.com/Jonathan-Asher/speakly/compare/v2.8.6...v2.8.7) (2026-09-11)
 
 
