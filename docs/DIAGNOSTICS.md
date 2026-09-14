@@ -119,6 +119,22 @@ rects neither tile nor agree with the physical cursor position, so
 `monitor_from_point` silently matched nothing and a position computed for one
 display could land the window off every screen.
 
+### The pill stops appearing after the first dictation
+
+Look for `pill → screen ...` in the log. If the line is there for a dictation
+you saw nothing during, the pill was shown and something hid it again.
+
+Every finished dictation arms a timer that returns the tray and pill to idle
+after 0.9-4.5 seconds, and a finalize thread can emit `Idle` for a session
+that has already ended. Neither is cancelled when a new dictation starts, so
+a session begun inside that window — dictating twice in a row, which is
+normal — used to have its pill hidden while it was still recording. The
+recording and paste worked, so the only symptom was an invisible pill, and it
+repeated for every dictation after the first.
+
+Both signals are now ignored while a dictation is running, and the log says
+so: `ignored a stale idle signal — a dictation is running`.
+
 ## Permissions
 
 | Line | Means |

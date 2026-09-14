@@ -32,19 +32,45 @@ where
     }
 }
 
+/// Return the tray and pill to idle — but only when no dictation is running.
+///
+/// Terminal signals from a finished session can land after the next one has
+/// begun: a finalize thread emitting `Idle`, or an idle timer armed before
+/// the new press. Acting on those takes the live session's pill down while it
+/// is still recording, which looks like the app has stopped working even
+/// though the dictation completes and pastes normally.
+///
+/// Must be called on the UI thread, where it is ordered against the `show`
+/// that a new session queues. Returns false when a dictation is running and
+/// the signal was therefore ignored.
+fn idle_if_finished(app: &AppHandle) -> bool {
+    if app
+        .state::<std::sync::Arc<speakly_engine::Engine>>()
+        .dictation
+        .is_active()
+    {
+        tracing::info!("ignored a stale idle signal — a dictation is running");
+        return false;
+    }
+    tray::set_state(app, "idle");
+    hud::hide(app);
+    true
+}
+
 impl AppSink {
     fn emit_state(&self, phase: &str, profile_id: &str) {
         crate::input::set_escape_armed(&self.app, phase == "listening");
         let phase_owned = phase.to_string();
         on_ui(&self.app, move |app| {
+            if phase_owned == "idle" {
+                idle_if_finished(&app);
+                return;
+            }
+
             tray::set_state(&app, &phase_owned);
-            match phase_owned.as_str() {
-                "listening" => {
-                    hud::show(&app);
-                    crate::sound::play(&app, crate::sound::Cue::Start);
-                }
-                "idle" => hud::hide(&app),
-                _ => {}
+            if phase_owned == "listening" {
+                hud::show(&app);
+                crate::sound::play(&app, crate::sound::Cue::Start);
             }
         });
         let _ = self.app.emit(
@@ -416,19 +442,30 @@ impl EventSink for AppSink {
     }
 }
 
-/// After a terminal phase, return the HUD/UI to idle shortly.
+/// After a terminal phase, return the HUD/UI to idle shortly — unless another
+/// dictation has begun in the meantime.
+///
+/// One of these is armed at the end of every dictation and nothing cancels
+/// them, so a session started inside the delay (0.9-4.5s, and dictating twice
+/// in a row is the normal case) used to have its pill hidden out from under
+/// it while it was still recording: audio captured, transcript pasted, but
+/// nothing on screen from the second dictation onwards.
+///
+/// The check belongs here, inside the UI closure, rather than before the
+/// dispatch: on the main thread it is ordered against the `show` a new
+/// session queues, so neither arrival order can leave the pill wrong.
 fn schedule_idle(app: &AppHandle, profile_id: String, delay_ms: u64) {
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-        on_ui(&app, |app| {
-            tray::set_state(&app, "idle");
-            hud::hide(&app);
+        on_ui(&app, move |app| {
+            if idle_if_finished(&app) {
+                let _ = app.emit(
+                    "dictation://state",
+                    json!({ "phase": "idle", "profileId": profile_id }),
+                );
+            }
         });
-        let _ = app.emit(
-            "dictation://state",
-            json!({ "phase": "idle", "profileId": profile_id }),
-        );
     });
 }
 
