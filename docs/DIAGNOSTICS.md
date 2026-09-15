@@ -135,9 +135,6 @@ repeated for every dictation after the first.
 Both signals are now ignored while a dictation is running, and the log says
 so: `ignored a stale idle signal — a dictation is running`.
 
-If the pill is invisible again, these three lines tell the whole story in one
-pass, without another round trip:
-
 Each show writes two lines — where it went, and what AppKit makes of the
 window afterwards:
 
@@ -154,10 +151,30 @@ pill state: visible=true occluded=false alpha=1.00 app-active=Some(false)
 | `alpha=0.00` | the window is transparent |
 | all three fine | it is genuinely on screen — compare the coordinates against the display you were looking at |
 
-`app-active` is only context. A background app can show a window perfectly
-well: ordering was tested directly against AppKit with an accessory-policy,
-non-activating, floating window over repeated hide/show cycles, and it stays
-visible throughout. Ordering has been ruled out as a cause.
+`pill state` is read about 400 ms after the pill is shown, not at the moment
+of showing. AppKit updates occlusion asynchronously, and a read taken straight
+after `show()` reports `occluded=true` for a pill that is plainly on screen and
+painted — so treat that line from builds before this change with suspicion.
+
+Three explanations for an invisible pill have been tested and ruled out by
+measurement rather than argument:
+
+- **Window ordering from a background app.** Reproduced directly against
+  AppKit with an accessory-policy, non-activating, floating window, another app
+  frontmost, over repeated hide/show cycles. It stays visible throughout.
+  `app-active` is logged only as context.
+- **The webview's content process dying.** Killing Speakly's WebKit content
+  processes makes Tauri's default termination handler reload the page, and the
+  UI comes back on its own.
+- **WebKit suspending a view that has been hidden for about five minutes.** The
+  real pill, driven through the production `AppSink` show/hide path, was hidden
+  for 390 seconds and shown again. It painted and animated within two seconds,
+  with `visible=true occluded=false alpha=1.00`.
+
+None of these reproduced the report on a single-display machine without the
+hotkey and microphone path in play, so the remaining difference is something
+on the reporting machine — its displays, the real input path, or memory
+pressure — and its log is the next piece of evidence to read.
 
 ## Permissions
 

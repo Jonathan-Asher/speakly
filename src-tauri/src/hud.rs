@@ -105,15 +105,31 @@ pub fn show(app: &AppHandle) {
     // `occluded` is the important one: when AppKit considers a window's
     // content not visible, WebKit stops rendering it, so the window can be
     // perfectly placed and ordered in while the pill itself never paints.
+    // Read after the window settles, not at the instant of showing: AppKit
+    // updates occlusion asynchronously, and a read taken right after
+    // `show()` reports `occluded=true` even for a pill that is plainly on
+    // screen and painted.
     #[cfg(target_os = "macos")]
-    if let Some(state) = window_state(&window) {
-        tracing::info!(
-            "pill state: visible={} occluded={} alpha={:.2} app-active={:?}",
-            state.visible,
-            !state.content_visible,
-            state.alpha,
-            app_is_active()
-        );
+    {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                let Some(window) = handle.get_webview_window(HUD_LABEL) else {
+                    return;
+                };
+                if let Some(state) = window_state(&window) {
+                    tracing::info!(
+                        "pill state: visible={} occluded={} alpha={:.2} app-active={:?}",
+                        state.visible,
+                        !state.content_visible,
+                        state.alpha,
+                        app_is_active()
+                    );
+                }
+            });
+        });
     }
 }
 
