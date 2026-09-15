@@ -1,3 +1,10 @@
+## [2.9.1](https://github.com/Jonathan-Asher/speakly/compare/v2.9.0...v2.9.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* read the pill's window state after it settles, not at the moment of showing ([58cf6e1](https://github.com/Jonathan-Asher/speakly/commit/58cf6e18cd6979709a7bdfe54f2dad8709955c66))
+
 # [2.9.0](https://github.com/Jonathan-Asher/speakly/compare/v2.8.10...v2.9.0) (2026-09-14)
 
 
