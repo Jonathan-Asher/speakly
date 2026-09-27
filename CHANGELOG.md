@@ -1,3 +1,16 @@
+# [2.10.0](https://github.com/Jonathan-Asher/speakly/compare/v2.9.1...v2.10.0) (2026-09-27)
+
+
+### Bug Fixes
+
+* show the recording pill when Stage Manager is on ([730c632](https://github.com/Jonathan-Asher/speakly/commit/730c632947b932be5ae983222dfe1c270facd4e4))
+* skip the MacBook's own microphone while the lid is closed ([afe9caf](https://github.com/Jonathan-Asher/speakly/commit/afe9caf02d7cce679e195a2180bf4fb2179abdcd))
+
+
+### Features
+
+* add your own instructions to a profile's cleanup and translation ([dd3e579](https://github.com/Jonathan-Asher/speakly/commit/dd3e5795d6a082a0034c678bfbbd00fa015fa770))
+
 ## [2.9.1](https://github.com/Jonathan-Asher/speakly/compare/v2.9.0...v2.9.1) (2026-09-15)
 
 
