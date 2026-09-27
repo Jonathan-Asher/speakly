@@ -8,6 +8,7 @@ export interface TranslateDraft {
   provider: string;
   target_language: string;
   system_prompt?: string | null;
+  instructions?: string | null;
   model?: string | null;
   endpoint?: string | null;
 }
@@ -138,6 +139,8 @@ export function ProfileEditor({
   const provider = draft.translate?.provider ?? "groq";
   // Google's API only translates; cleanup needs a language model.
   const refineBlocked = refineOn && provider === "google";
+  const aiTask =
+    refineOn && translateOn ? "cleanup and translation" : refineOn ? "cleanup" : "translation";
 
   return (
     <div
@@ -265,6 +268,23 @@ export function ProfileEditor({
                       onChange={(e) => setTranslate({ target_language: e.target.value })}
                     />
                   </Row>
+                )}
+                {provider !== "google" && (
+                  <label className="flex flex-col gap-1.5 text-sm">
+                    <span className="text-neutral-600 dark:text-neutral-400">Instructions</span>
+                    <textarea
+                      className="min-h-20 w-full rounded-md border border-neutral-300 bg-white px-2.5 py-1.5 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+                      dir="auto"
+                      rows={3}
+                      value={draft.translate?.instructions ?? ""}
+                      placeholder="e.g. Keep legal terms in Hebrew. Use a formal tone."
+                      onChange={(e) => setTranslate({ instructions: e.target.value || null })}
+                    />
+                    <span className="text-xs text-neutral-400">
+                      Added to the built-in {aiTask} prompt for this profile — where
+                      they disagree, yours win.
+                    </span>
+                  </label>
                 )}
                 <Row label="Model override">
                   <input

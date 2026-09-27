@@ -332,6 +332,7 @@ fn he_en_profile() -> Profile {
             provider: TranslationProvider::Groq,
             target_language: "English".into(),
             system_prompt: None,
+            instructions: None,
             model: None,
             endpoint: None,
         }),

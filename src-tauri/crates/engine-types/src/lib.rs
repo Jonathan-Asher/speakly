@@ -26,6 +26,11 @@ pub struct TranslateConfig {
     pub target_language: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
+    /// The user's own guidance for this profile's AI stage, added to the
+    /// built-in refine/translate prompt rather than replacing it — e.g. "keep
+    /// legal terms in Hebrew" or "use a formal tone". Blank means none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
     /// Provider model override (each provider has a sensible default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,

@@ -312,6 +312,7 @@ pub fn test_translation(provider: String, target_language: String) -> Result<Str
         provider: parsed,
         target_language,
         system_prompt: None,
+        instructions: None,
         model: None,
         endpoint: None,
     };

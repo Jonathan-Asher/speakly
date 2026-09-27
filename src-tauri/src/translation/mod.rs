@@ -25,21 +25,38 @@ const REFINE_INSTRUCTION: &str = "Turn dictated speech into the message the spea
     Example — input: `אה… תשמע, בעצם, אני צריך לשלוח, אני צריך לשלוח את המסמך ללקוח.` → output: \
     `אני צריך לשלוח את המסמך ללקוח.`";
 
-/// System prompt for the profile's AI stage: refine, translate, or both.
+/// System prompt for the profile's AI stage: refine, translate, or both, plus
+/// the profile's own instructions when it has any.
 fn stage_prompt(cfg: &TranslateConfig) -> String {
+    let extra = cfg
+        .instructions
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            format!(
+                "\nAdditional instructions from the user — follow them, and where they conflict \
+                 with the guidance above, they win:\n{s}"
+            )
+        })
+        .unwrap_or_default();
     match (cfg.refine, cfg.enabled) {
+        // The output rule stays last so the user's instructions cannot bury it.
         (true, true) => format!(
-            "{REFINE_INSTRUCTION}\nThen translate the result to {}. Output only the clean \
-             translation.",
+            "{REFINE_INSTRUCTION}\nThen translate the result to {}.{extra}\nOutput only the \
+             clean translation.",
             cfg.target_language
         ),
-        (true, false) => format!("{REFINE_INSTRUCTION}\nOutput only the cleaned text."),
+        (true, false) => format!("{REFINE_INSTRUCTION}{extra}\nOutput only the cleaned text."),
         // Translate-only keeps the user's custom prompt override.
-        (false, _) => cfg
-            .system_prompt
-            .clone()
-            .unwrap_or_else(|| DEFAULT_SYSTEM.to_string())
-            .replace("{targetLanguage}", &cfg.target_language),
+        (false, _) => {
+            let base = cfg
+                .system_prompt
+                .clone()
+                .unwrap_or_else(|| DEFAULT_SYSTEM.to_string())
+                .replace("{targetLanguage}", &cfg.target_language);
+            format!("{base}{extra}")
+        }
     }
 }
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -330,6 +347,7 @@ mod stage_tests {
             provider: TranslationProvider::Groq,
             target_language: "English".into(),
             system_prompt: None,
+            instructions: None,
             model: None,
             endpoint: None,
         }
@@ -362,5 +380,41 @@ mod stage_tests {
         let mut c = cfg(false, true);
         c.system_prompt = Some("Say it in {targetLanguage}, pirate style.".into());
         assert_eq!(stage_prompt(&c), "Say it in English, pirate style.");
+    }
+
+    #[test]
+    fn instructions_extend_the_prompt_and_the_output_rule_stays_last() {
+        let mut c = cfg(true, true);
+        c.instructions = Some("  Keep legal terms in Hebrew.\n".into());
+        let p = stage_prompt(&c);
+        // Added to the built-in guidance, not replacing it.
+        assert!(p.contains("Remove filler sounds"));
+        assert!(p.contains("translate the result to English"));
+        assert!(p.contains("Additional instructions from the user"));
+        assert!(p.contains("Keep legal terms in Hebrew."));
+        assert!(p.ends_with("Output only the clean translation."));
+
+        c.enabled = false;
+        let p = stage_prompt(&c);
+        assert!(p.contains("Keep legal terms in Hebrew."));
+        assert!(p.ends_with("Output only the cleaned text."));
+    }
+
+    #[test]
+    fn instructions_reach_translate_only_too() {
+        let mut c = cfg(false, true);
+        c.instructions = Some("Use a formal tone.".into());
+        let p = stage_prompt(&c);
+        assert!(p.starts_with("Translate the user's text to English"));
+        assert!(p.contains("Use a formal tone."));
+    }
+
+    #[test]
+    fn blank_instructions_change_nothing() {
+        for blank in ["", "   \n\t"] {
+            let mut c = cfg(true, true);
+            c.instructions = Some(blank.into());
+            assert_eq!(stage_prompt(&c), stage_prompt(&cfg(true, true)));
+        }
     }
 }
