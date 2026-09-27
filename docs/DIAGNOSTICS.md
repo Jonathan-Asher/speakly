@@ -69,6 +69,12 @@ entry wins; if none are connected, the OS default is used.
 | `'<name>' runs at <n> Hz; converting to the capture's <m> Hz` | the replacement could not match the original rate, so samples are converted |
 | `audio route changed` | the host rerouted us itself; no action needed |
 | `microphone '<name>' keeps dropping out — giving up after 3 switches` | failover is capped, to stop a flapping device spinning the capture thread |
+| `lid is closed — '<name>' is disabled in clamshell mode, skipping it` | the MacBook's own microphone still shows up with the lid closed but records silence, so it is passed over for the next entry |
+| `the lid is closed — the built-in microphone '<name>' is disabled in clamshell mode` | nothing else in the list was connected, so the dictation fails rather than record silence |
+
+The lid state comes from `AppleClamshellState` in the IORegistry
+(`ioreg -r -k AppleClamshellState -d 1`). If it cannot be read, the lid is
+treated as open.
 
 ### A slow microphone
 

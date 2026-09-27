@@ -8,6 +8,12 @@
 //! whatever the OS currently calls the default. If the chosen device goes away
 //! mid-recording — the normal life of a Bluetooth headset — the thread reopens
 //! on the next entry rather than leaving the rest of the utterance silent.
+//!
+//! One entry can be connected yet unusable: the MacBook's own microphone is
+//! hardware-disabled whenever the lid is closed (clamshell mode, external
+//! display), but it still enumerates through CoreAudio, so "is it in the
+//! device list" cannot distinguish it from a working mic. Selecting it anyway
+//! records perfect silence, so clamshell state is checked before picking.
 
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 
@@ -58,6 +64,89 @@ fn describe(device: &cpal::Device) -> Option<InputDevice> {
         .map(|desc| desc.name().to_string())
         .unwrap_or_else(|_| id.clone());
     Some(InputDevice { id, name })
+}
+
+/// Is this input one of the Mac's own microphones? cpal does not expose the
+/// transport, so the name is the signal. Covers the Apple Silicon names
+/// ("MacBook Pro Microphone", "MacBook Air Microphone") and the older
+/// "Internal/Built-in Microphone". Conservative on purpose: a USB or Bluetooth
+/// box that happens to embed these words must never be skipped.
+fn is_builtin_name(name: &str) -> bool {
+    let n = name.to_lowercase();
+    n.contains("macbook") || n.contains("internal microphone") || n.contains("built-in microphone")
+}
+
+/// Would this device be selectable with the lid in this state? The one rule
+/// everything else composes from, kept pure so it is directly testable: a
+/// closed lid disables only the built-in microphone, never anything plugged
+/// or paired in.
+fn is_selectable(builtin: bool, lid_closed: bool) -> bool {
+    !(builtin && lid_closed)
+}
+
+/// True when the MacBook lid is closed (clamshell mode).
+///
+/// When closed, macOS hardware-disables the internal microphone — but the
+/// device still enumerates, and opening it succeeds while delivering silence.
+/// Only the IORegistry knows the truth: the power-management root domain
+/// publishes `AppleClamshellState`. Read via `ioreg` rather than IOKit
+/// bindings to avoid a new dependency for one property; a spawn costs tens of
+/// milliseconds, and this is consulted on device selection and failover —
+/// never per audio callback — with a short cache so a burst of re-picks
+/// cannot spam it.
+///
+/// Fail-open: an unreadable registry answers "open" and preserves the old
+/// behavior, which is wrong only on a closed lid, not everywhere.
+#[cfg(target_os = "macos")]
+fn lid_closed() -> bool {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    /// The lid does not flap mid-second; one cached answer per 2s is plenty.
+    const TTL: Duration = Duration::from_secs(2);
+    static CACHE: std::sync::OnceLock<Mutex<Option<(Instant, bool)>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+
+    let mut cached = cache.lock().unwrap();
+    if let Some((read_at, closed)) = *cached {
+        if read_at.elapsed() < TTL {
+            return closed;
+        }
+    }
+
+    let output = std::process::Command::new("ioreg")
+        .args(["-r", "-k", "AppleClamshellState", "-d", "1"])
+        .output();
+    let parsed = output
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| clamshell_from_ioreg(&String::from_utf8_lossy(&out.stdout)));
+    if let Some(closed) = parsed {
+        *cached = Some((Instant::now(), closed));
+    }
+    parsed.unwrap_or(false)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn lid_closed() -> bool {
+    // No lid on this platform, no guard needed.
+    false
+}
+
+/// Extract `AppleClamshellState` from `ioreg -r -k AppleClamshellState -d 1`
+/// output. Matches the exact key — the same node also carries
+/// `AppleClamshellCausesSleep`, which must not be mistaken for it. None means
+/// the property is absent or unreadable.
+#[cfg(target_os = "macos")]
+fn clamshell_from_ioreg(output: &str) -> Option<bool> {
+    output.lines().find_map(|line| {
+        let value = line.split("\"AppleClamshellState\" = ").nth(1)?.trim();
+        match value {
+            "Yes" => Some(true),
+            "No" => Some(false),
+            _ => None,
+        }
+    })
 }
 
 impl CaptureService {
@@ -240,14 +329,33 @@ struct Opened {
 }
 
 /// First connected microphone in `priority`, else the OS default.
-fn pick(host: &cpal::Host, priority: &[String]) -> Option<cpal::Device> {
-    let connected: Vec<cpal::Device> = host.input_devices().ok()?.collect();
+///
+/// The clamshell guard runs here (and therefore on failover too, which re-enters
+/// through `open_stream` → `pick`): with the lid closed the built-in microphone
+/// is hardware-disabled yet still enumerates, so it is skipped exactly like a
+/// disconnected entry and selection falls through to the next preference.
+/// A `Result` rather than an `Option` so the refusal can say WHY nothing was
+/// selectable instead of surfacing as a generic "no input device available".
+fn pick(host: &cpal::Host, priority: &[String]) -> Result<cpal::Device, String> {
+    let clamshell = lid_closed();
+    let connected: Vec<cpal::Device> = host
+        .input_devices()
+        .map_err(|e| format!("enumerate input devices: {e}"))?
+        .collect();
     for want in priority {
         if let Some(device) = connected
             .iter()
             .find(|d| d.id().is_ok_and(|id| id.to_string() == *want))
         {
-            return Some(device.clone());
+            if let Some(name) = describe(device).map(|d| d.name) {
+                if !is_selectable(is_builtin_name(&name), clamshell) {
+                    tracing::warn!(
+                        "lid is closed — '{name}' is disabled in clamshell mode, skipping it"
+                    );
+                    continue;
+                }
+            }
+            return Ok(device.clone());
         }
     }
     if !priority.is_empty() {
@@ -258,7 +366,19 @@ fn pick(host: &cpal::Host, priority: &[String]) -> Option<cpal::Device> {
             priority.len()
         );
     }
-    host.default_input_device()
+    let default = host
+        .default_input_device()
+        .ok_or("no input device available")?;
+    // The default can be the built-in itself (no priority list, or every entry
+    // skipped above). Recording from it in clamshell means silence, so refuse
+    // and fail the dictation with a reason instead.
+    let name = describe(&default).map(|d| d.name).unwrap_or_default();
+    if !is_selectable(is_builtin_name(&name), clamshell) {
+        return Err(format!(
+            "the lid is closed — the built-in microphone '{name}' is disabled in clamshell mode"
+        ));
+    }
+    Ok(default)
 }
 
 fn open_stream(
@@ -269,7 +389,7 @@ fn open_stream(
     generation: u64,
 ) -> Result<Opened, String> {
     let host = cpal::default_host();
-    let device = pick(&host, priority).ok_or("no input device available")?;
+    let device = pick(&host, priority)?;
     let name = describe(&device).map(|d| d.name).unwrap_or_default();
 
     let mut supported = device
@@ -405,6 +525,53 @@ mod tests {
             std::thread::yield_now();
         }
         thread.join().unwrap();
+    }
+
+    #[test]
+    fn a_closed_lid_disables_only_the_builtin() {
+        use super::is_selectable;
+        // Closed lid: the built-in mic is hardware-disabled — skip it.
+        assert!(!is_selectable(true, true));
+        // Closed lid: everything plugged or paired in still works.
+        assert!(is_selectable(false, true));
+        // Open lid: the built-in mic is a perfectly good microphone.
+        assert!(is_selectable(true, false));
+        assert!(is_selectable(false, false));
+    }
+
+    #[test]
+    fn builtin_detection_names_the_macs_own_microphones() {
+        use super::is_builtin_name;
+        assert!(is_builtin_name("MacBook Pro Microphone"));
+        assert!(is_builtin_name("MacBook Air Microphone"));
+        assert!(is_builtin_name("MacBook Microphone"));
+        assert!(is_builtin_name("Internal Microphone"));
+        assert!(is_builtin_name("Built-in Microphone"));
+        // External hardware must never match, whatever its name.
+        assert!(!is_builtin_name("DJI Mic Mini 2-CE73A4"));
+        assert!(!is_builtin_name("WH-1000XM6"));
+        assert!(!is_builtin_name("Wireless Mic Rx"));
+        assert!(!is_builtin_name("Jonathan’s iPhone Microphone"));
+        assert!(!is_builtin_name(""));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn ioreg_output_parses_into_a_lid_state() {
+        use super::clamshell_from_ioreg;
+        let open = "+-o IOPMrootDomain  <class IOPMrootDomain>\n";
+        let yes = "      \"AppleClamshellCausesSleep\" = No\n      \"AppleClamshellState\" = Yes\n";
+        // Only the exact key counts — the CausesSleep variant must not leak in.
+        assert_eq!(clamshell_from_ioreg(&format!("{open}{yes}")), Some(true));
+        let no = "      \"AppleClamshellCausesSleep\" = Yes\n      \"AppleClamshellState\" = No\n";
+        assert_eq!(clamshell_from_ioreg(&format!("{open}{no}")), Some(false));
+        // Property absent (desktop Mac, or a registry layout change): unreadable,
+        // which callers must treat as "lid open".
+        assert_eq!(clamshell_from_ioreg(open), None);
+        assert_eq!(clamshell_from_ioreg(""), None);
+        // A value we do not recognize is not a yes.
+        let weird = "      \"AppleClamshellState\" = 12\n";
+        assert_eq!(clamshell_from_ioreg(weird), None);
     }
 
     #[test]
