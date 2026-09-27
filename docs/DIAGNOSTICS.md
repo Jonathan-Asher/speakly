@@ -171,10 +171,29 @@ measurement rather than argument:
   for 390 seconds and shown again. It painted and animated within two seconds,
   with `visible=true occluded=false alpha=1.00`.
 
-None of these reproduced the report on a single-display machine without the
-hotkey and microphone path in play, so the remaining difference is something
-on the reporting machine — its displays, the real input path, or memory
-pressure — and its log is the next piece of evidence to read.
+None of these reproduced the report because none of the test machines had
+**Stage Manager** on — and that was the cause. The affected Mac's log showed
+`occluded=true` on nearly every dictation for days, and the exceptions were all
+dictations into an app running full screen, a Space that Stage Manager does not
+manage. With Stage Manager on, only the current stage's apps are composited.
+Speakly is never the active app while you dictate, so its pill window was
+ordered in but never drawn. The pill now carries the
+`canJoinAllApplications` collection behavior (macOS 13+), which lets a floating
+overlay join other apps' stages and full-screen Spaces. It is applied when the
+window is built and again on every show.
+
+The `pill state` line now also reports `onscreen=` — whether the window is in
+the WindowServer's on-screen list, which neither `isVisible` nor
+`occlusionState` can tell you. If a pill still settles as occluded, it is
+re-ordered with `orderFrontRegardless`, and a second line says whether that
+healed it:
+
+```
+pill state after re-order: occluded=false onscreen=Some(true)
+```
+
+To check whether Stage Manager is on: `defaults read com.apple.WindowManager
+GloballyEnabled` (`1` = on).
 
 ## Permissions
 
