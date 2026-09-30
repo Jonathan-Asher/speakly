@@ -1,3 +1,10 @@
+## [2.10.1](https://github.com/Jonathan-Asher/speakly/compare/v2.10.0...v2.10.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* rebuild the recording pill when macOS pins it to one Space ([693cec7](https://github.com/Jonathan-Asher/speakly/commit/693cec793abfa124d2837a3eafa78502e2d23ddd))
+
 # [2.10.0](https://github.com/Jonathan-Asher/speakly/compare/v2.9.1...v2.10.0) (2026-09-27)
 
 
