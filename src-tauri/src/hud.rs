@@ -3,20 +3,57 @@
 //! window is made non-activating (it can never become key and steal the paste
 //! target's focus) and ignores the mouse.
 
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+
 use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
-pub const HUD_LABEL: &str = "hud";
+const HUD_LABEL: &str = "hud";
 const WIDTH: f64 = 480.0;
 const HEIGHT: f64 = 76.0;
 const BOTTOM_MARGIN: f64 = 96.0;
 /// Clearance kept above the Dock when it sits along the bottom edge.
 const DOCK_GAP: f64 = 8.0;
 
+/// Bumped each time the pill window is rebuilt, and carried in its label:
+/// Tauri frees a destroyed window's label only once the event loop has
+/// processed the destruction, too late to create the replacement under the
+/// same name.
+static GENERATION: AtomicU32 = AtomicU32::new(0);
+
+/// The last dictation state sent to the UI. A pill rebuilt mid-dictation
+/// opens in it rather than in the page's idle default — the event that showed
+/// the pill went out before its replacement existed.
+static LAST_STATE: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+fn label() -> String {
+    match GENERATION.load(Ordering::Relaxed) {
+        0 => HUD_LABEL.to_string(),
+        n => format!("{HUD_LABEL}-{n}"),
+    }
+}
+
+fn current(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.get_webview_window(&label())
+}
+
+/// Record a dictation state as it goes out to the UI; see `LAST_STATE`.
+pub fn note_state(phase: &str, profile_id: &str) {
+    *LAST_STATE.lock().unwrap() = Some((phase.to_string(), profile_id.to_string()));
+}
+
 pub fn ensure(app: &AppHandle) -> tauri::Result<()> {
-    if app.get_webview_window(HUD_LABEL).is_some() {
+    let label = label();
+    if app.get_webview_window(&label).is_some() {
         return Ok(());
     }
-    let window = WebviewWindowBuilder::new(app, HUD_LABEL, WebviewUrl::App("hud.html".into()))
+    let seed = LAST_STATE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|(phase, profile_id)| serde_json::json!({ "phase": phase, "profileId": profile_id }))
+        .unwrap_or(serde_json::Value::Null);
+    let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("hud.html".into()))
         .title("Speakly")
         .inner_size(WIDTH, HEIGHT)
         .decorations(false)
@@ -29,6 +66,7 @@ pub fn ensure(app: &AppHandle) -> tauri::Result<()> {
         .focused(false)
         .resizable(false)
         .visible(false)
+        .initialization_script(format!("window.__SPEAKLY_HUD_STATE__ = {seed};"))
         .build()?;
     let _ = window.set_ignore_cursor_events(true);
     make_non_activating(&window);
@@ -63,7 +101,7 @@ pub fn is_key_window(app: &AppHandle) -> bool {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
-    let Some(window) = app.get_webview_window(HUD_LABEL) else {
+    let Some(window) = current(app) else {
         return false;
     };
     let Ok(ptr) = window.ns_window() else {
@@ -81,91 +119,172 @@ pub fn show(app: &AppHandle) {
     if let Err(e) = ensure(app) {
         tracing::warn!("could not create the recording pill: {e}");
     }
-    let Some(window) = app.get_webview_window(HUD_LABEL) else {
+    let Some(window) = current(app) else {
         tracing::warn!("recording pill window is missing — nothing to show");
         return;
     };
+    present(app, &window);
+    #[cfg(target_os = "macos")]
+    check_after_showing(app, false);
+}
+
+fn present(app: &AppHandle, window: &tauri::WebviewWindow) {
     // Re-assert: a space switch or another app going full-screen can leave the
     // pill ordered below whatever is in front.
     let _ = window.set_always_on_top(true);
-    reassert_spaces(&window);
-    place(app, &window);
+    reassert_spaces(window);
+    place(app, window);
     let _ = window.show();
     // Re-apply once visible: a hidden window can ignore a move, and on macOS
     // the frame only settles onto the target display after the window is
     // ordered in.
-    place(app, &window);
+    place(app, window);
+}
 
-    // One line per dictation saying what AppKit thinks of the window it was
-    // just asked to show. "I can't see the pill" has had several unrelated
-    // causes and the log could not tell them apart; these three values do.
-    //
-    // `occluded` is the important one: when AppKit considers a window's
-    // content not visible, WebKit stops rendering it, so the window can be
-    // perfectly placed and ordered in while the pill itself never paints.
-    // Read after the window settles, not at the instant of showing: AppKit
-    // updates occlusion asynchronously, and a read taken right after
-    // `show()` reports `occluded=true` even for a pill that is plainly on
-    // screen and painted.
-    #[cfg(target_os = "macos")]
-    {
-        let app = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(400));
-            let handle = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                let Some(window) = handle.get_webview_window(HUD_LABEL) else {
-                    return;
-                };
-                let Some(state) = window_state(&window) else {
-                    return;
-                };
-                // Is the window on screen per the WindowServer, or only per
-                // AppKit's own bookkeeping? onscreen=false means it was never
-                // composited (another stage or Space); onscreen=true while
-                // AppKit still says occluded is an AppKit/WebKit state bug
-                // that only a re-order fixes.
-                let onscreen = pill_onscreen(&window);
-                tracing::info!(
-                    "pill state: visible={} occluded={} alpha={:.2} app-active={:?} onscreen={:?}",
-                    state.visible,
-                    !state.content_visible,
-                    state.alpha,
-                    app_is_active(),
-                    onscreen
-                );
-
-                // Still occluded once settled means WebKit is throttled and
-                // the pill will never paint. Every cheap lever that makes
-                // AppKit recompute occlusion is pulled here, and the result
-                // logged — so the log shows both the failure and whether the
-                // heal worked.
-                if !state.visible || state.content_visible {
-                    return;
-                }
-                reassert_spaces(&window);
-                place(&handle, &window);
-                order_front_regardless(&window);
-                let app = handle.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(250));
-                    let handle = app.clone();
-                    let _ = app.run_on_main_thread(move || {
-                        let Some(window) = handle.get_webview_window(HUD_LABEL) else {
-                            return;
-                        };
-                        let Some(state) = window_state(&window) else {
-                            return;
-                        };
-                        tracing::info!(
-                            "pill state after re-order: occluded={} onscreen={:?}",
-                            !state.content_visible,
-                            pill_onscreen(&window)
-                        );
-                    });
-                });
-            });
+/// One line per dictation saying what AppKit and the WindowServer make of the
+/// pill once it has settled — and a new window when it did not reach the
+/// screen.
+///
+/// `occluded` says whether AppKit considers the content visible; when it does
+/// not, WebKit stops rendering, so a perfectly placed window can still show
+/// nothing. It is read after the window settles, not at the instant of
+/// showing: AppKit updates occlusion asynchronously, and a read taken right
+/// after `show()` reports `occluded=true` even for a pill plainly on screen.
+///
+/// `onscreen` is the WindowServer's own answer and decides the repair. With
+/// Stage Manager on, macOS can move the pill into a single Space: when an app
+/// leaves full screen, the windows of its full-screen Space are reassociated
+/// to the desktop it returns to, and the pill — which joins other apps'
+/// full-screen Spaces — went along. From then on it only appeared on that one
+/// desktop, and neither re-asserting the collection behavior nor ordering it
+/// front again brought it back. A fresh window does not carry that state, so
+/// the pill is rebuilt, at most once per `REBUILD_COOLDOWN`, in case the cause
+/// is one a new window cannot fix either.
+#[cfg(target_os = "macos")]
+fn check_after_showing(app: &AppHandle, rebuilt: bool) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let Some(window) = current(&handle) else {
+                return;
+            };
+            let Some(state) = window_state(&window) else {
+                return;
+            };
+            let onscreen = pill_onscreen(&window);
+            tracing::info!(
+                "pill state{}: visible={} occluded={} alpha={:.2} app-active={:?} onscreen={:?}",
+                if rebuilt { " after rebuild" } else { "" },
+                state.visible,
+                !state.content_visible,
+                state.alpha,
+                app_is_active(),
+                onscreen
+            );
+            // Hidden again before the check (a quick tap), or on screen:
+            // nothing to repair.
+            if !state.visible || onscreen != Some(false) {
+                return;
+            }
+            let spaces = spaces_report(&window);
+            if rebuilt {
+                tracing::warn!("the rebuilt pill is not on screen either ({spaces})");
+                return;
+            }
+            if !rebuild_allowed() {
+                tracing::warn!("pill is not on screen ({spaces}) — rebuilt recently, not again");
+                return;
+            }
+            tracing::warn!("pill is not on screen ({spaces}) — rebuilding its window");
+            rebuild(&handle);
         });
+    });
+}
+
+/// Minimum time between two rebuilds of the pill window.
+#[cfg(target_os = "macos")]
+const REBUILD_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+
+#[cfg(target_os = "macos")]
+fn rebuild_allowed() -> bool {
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    let mut last = LAST.lock().unwrap();
+    if last.is_some_and(|at| at.elapsed() < REBUILD_COOLDOWN) {
+        return false;
+    }
+    *last = Some(std::time::Instant::now());
+    true
+}
+
+/// Replace the pill window with a new one and show it in the old one's place.
+/// The new window exists before the old one is destroyed, so a failure leaves
+/// the old pill rather than none.
+#[cfg(target_os = "macos")]
+fn rebuild(app: &AppHandle) {
+    let old = current(app);
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+    if let Err(e) = ensure(app) {
+        GENERATION.fetch_sub(1, Ordering::Relaxed);
+        tracing::warn!("could not rebuild the recording pill: {e}");
+        return;
+    }
+    if let Some(old) = old {
+        let _ = old.destroy();
+    }
+    if let Some(window) = current(app) {
+        present(app, &window);
+        check_after_showing(app, true);
+    }
+}
+
+/// Which Spaces the WindowServer has the pill in, against the active one. A
+/// pill pinned to a single Space shows up here as one Space that is not the
+/// active one. These are private SkyLight calls, looked up at run time so a
+/// macOS without them loses a log field rather than failing to launch.
+#[cfg(target_os = "macos")]
+fn spaces_report(window: &tauri::WebviewWindow) -> String {
+    use core_foundation::array::{CFArray, CFArrayRef};
+    use core_foundation::base::TCFType;
+    use core_foundation::number::CFNumber;
+    use objc2::{msg_send, runtime::AnyObject};
+    use std::ffi::CStr;
+
+    type MainConnection = unsafe extern "C" fn() -> i32;
+    type ActiveSpace = unsafe extern "C" fn(i32) -> u64;
+    type CopySpaces = unsafe extern "C" fn(i32, i32, CFArrayRef) -> CFArrayRef;
+
+    unsafe fn lookup<F: Copy>(name: &CStr) -> Option<F> {
+        let symbol = libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr());
+        (!symbol.is_null()).then(|| std::mem::transmute_copy(&symbol))
+    }
+
+    let Ok(ptr) = window.ns_window() else {
+        return "spaces unknown".into();
+    };
+    let number: isize = unsafe { msg_send![&*(ptr as *mut AnyObject), windowNumber] };
+    unsafe {
+        let (Some(main), Some(active), Some(copy)) = (
+            lookup::<MainConnection>(c"SLSMainConnectionID"),
+            lookup::<ActiveSpace>(c"SLSGetActiveSpace"),
+            lookup::<CopySpaces>(c"SLSCopySpacesForWindows"),
+        ) else {
+            return "spaces unknown".into();
+        };
+        let cid = main();
+        let ids = CFArray::from_CFTypes(&[CFNumber::from(number as i32)]);
+        // 7: the current, other and user Spaces — every Space the window is in.
+        let raw = copy(cid, 7, ids.as_concrete_TypeRef());
+        let spaces: Vec<i64> = if raw.is_null() {
+            Vec::new()
+        } else {
+            CFArray::<CFNumber>::wrap_under_create_rule(raw)
+                .iter()
+                .filter_map(|n| n.to_i64())
+                .collect()
+        };
+        format!("spaces={spaces:?} active={}", active(cid))
     }
 }
 
@@ -211,22 +330,6 @@ fn reassert_spaces(window: &tauri::WebviewWindow) {
 
 #[cfg(not(target_os = "macos"))]
 fn reassert_spaces(_window: &tauri::WebviewWindow) {}
-
-/// Order the pill in regardless of activation state. `window.show()` goes
-/// through `orderFront:`, which an inactive app can have downgraded to a
-/// bookkeeping-only operation: the window counts as visible while the
-/// WindowServer is never asked to composite it — exactly the
-/// visible-but-occluded state. `orderFrontRegardless` skips that gate.
-#[cfg(target_os = "macos")]
-fn order_front_regardless(window: &tauri::WebviewWindow) {
-    use objc2::{msg_send, runtime::AnyObject};
-
-    let Ok(ptr) = window.ns_window() else { return };
-    let ns = ptr as *mut AnyObject;
-    unsafe {
-        let _: () = msg_send![&mut *ns, orderFrontRegardless];
-    }
-}
 
 /// Is the pill actually composited on screen, per the WindowServer's own
 /// window list? This is the ground truth `isVisible` and `occlusionState`
@@ -371,7 +474,7 @@ fn place(app: &AppHandle, window: &tauri::WebviewWindow) {
 }
 
 pub fn hide(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(HUD_LABEL) {
+    if let Some(window) = current(app) {
         let _ = window.hide();
     }
 }

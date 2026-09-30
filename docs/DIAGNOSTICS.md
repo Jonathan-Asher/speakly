@@ -188,18 +188,39 @@ ordered in but never drawn. The pill now carries the
 overlay join other apps' stages and full-screen Spaces. It is applied when the
 window is built and again on every show.
 
-The `pill state` line now also reports `onscreen=` — whether the window is in
-the WindowServer's on-screen list, which neither `isVisible` nor
-`occlusionState` can tell you. If a pill still settles as occluded, it is
-re-ordered with `orderFrontRegardless`, and a second line says whether that
-healed it:
+The `pill state` line also reports `onscreen=`: whether the window is in the
+WindowServer's on-screen list, which neither `isVisible` nor `occlusionState`
+can tell you.
+
+That field exposed a second failure, two days after the first fix. Stage
+Manager was on, and Arc left full screen. macOS then moved the windows of
+Arc's full-screen Space to the desktop Arc returned to, and the pill went with
+them (it joins other apps' full-screen Spaces). After that the pill showed on
+that one desktop only, with `onscreen=Some(false)` everywhere else. Asserting
+its collection behavior again did not bring it back, and neither did ordering
+it front again. The window itself was stuck, and a fresh one is not, so a
+pill that is not on screen once it has settled is now rebuilt:
 
 ```
-pill state after re-order: occluded=false onscreen=Some(true)
+pill is not on screen (spaces=[6] active=5) — rebuilding its window
+pill state after rebuild: visible=true occluded=false alpha=1.00 app-active=Some(false) onscreen=Some(true)
 ```
+
+`spaces=` is every Space the WindowServer has the window in, and `active=` is
+the Space you are on. A single Space that is not the active one means the pill
+was pinned. The rebuilt window opens in the current dictation state, so it
+shows the same thing the old one would have.
+
+A pill is rebuilt at most once every 30 seconds. If the new window does not
+reach the screen either, the log says `the rebuilt pill is not on screen
+either (…)`, meaning a cause a fresh window cannot fix. A second failure
+within the 30 seconds logs `rebuilt recently, not again`.
 
 To check whether Stage Manager is on: `defaults read com.apple.WindowManager
-GloballyEnabled` (`1` = on).
+GloballyEnabled` (`1` = on). The Dock logs each Space switch as `switching to
+space N for window(…) ordered on non-visible space`, which is how you line up
+the Space you were on with a `pill state` line. Read it with `/usr/bin/log
+show --predicate 'process == "Dock"'` (in zsh, a bare `log` is a builtin).
 
 ## Permissions
 

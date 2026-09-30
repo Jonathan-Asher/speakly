@@ -60,6 +60,7 @@ fn idle_if_finished(app: &AppHandle) -> bool {
 impl AppSink {
     fn emit_state(&self, phase: &str, profile_id: &str) {
         crate::input::set_escape_armed(&self.app, phase == "listening");
+        hud::note_state(phase, profile_id);
         let phase_owned = phase.to_string();
         on_ui(&self.app, move |app| {
             if phase_owned == "idle" {

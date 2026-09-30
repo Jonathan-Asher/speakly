@@ -1,6 +1,14 @@
 import { useEffect } from "react";
 import { strings } from "../../lib/strings";
+import type { DictationPhase } from "../../ipc/events";
 import { attachDictationEvents, useDictationStore } from "../../stores/dictation";
+
+declare global {
+  interface Window {
+    /** Set by the app when it rebuilds this window mid-dictation. */
+    __SPEAKLY_HUD_STATE__?: { phase: DictationPhase; profileId: string } | null;
+  }
+}
 
 /**
  * The recording pill. Lives in its own tiny always-on-top non-activating
@@ -8,6 +16,10 @@ import { attachDictationEvents, useDictationStore } from "../../stores/dictation
  */
 export function HudPill() {
   useEffect(() => {
+    // A rebuilt pill missed the state event that showed it; start from the
+    // state the app handed over instead of idle.
+    const seed = window.__SPEAKLY_HUD_STATE__;
+    if (seed) useDictationStore.setState({ phase: seed.phase, profileId: seed.profileId });
     attachDictationEvents();
   }, []);
   const phase = useDictationStore((s) => s.phase);
